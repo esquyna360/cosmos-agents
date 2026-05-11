@@ -16,8 +16,21 @@ export type PaletteMode = "files" | "grep";
 
 interface Props {
   mode: PaletteMode;
-  root: string;
+  roots: string[];
   onClose: () => void;
+}
+
+/** A unified entry in the merged file index: { root, rel } so we can rebuild
+ *  the absolute path on selection and label results by root when there are
+ *  multiple. */
+interface FileEntry {
+  root: string;
+  rel: string;
+}
+
+/** A grep hit augmented with its source root for display + open. */
+interface MatchEntry extends GrepMatch {
+  root: string;
 }
 
 export default function CommandPalette(props: Props) {
@@ -25,13 +38,24 @@ export default function CommandPalette(props: Props) {
   const [query, setQuery] = createSignal("");
   const [cursor, setCursor] = createSignal(0);
 
-  // Files: walked once per root, then filtered client-side as the user types.
+  // Files: walk every root once, flatten into a merged list.
   const [files] = createResource(
-    () => (props.mode === "files" ? props.root : null),
-    (root) => fsWalk(root),
+    () => (props.mode === "files" ? props.roots.join("|") : null),
+    async () => {
+      const out: FileEntry[] = [];
+      for (const root of props.roots) {
+        try {
+          const list = await fsWalk(root);
+          for (const rel of list) out.push({ root, rel });
+        } catch (e) {
+          console.error("[palette] fsWalk failed for", root, e);
+        }
+      }
+      return out;
+    },
   );
 
-  // Grep: hits the backend whenever the (debounced) query changes.
+  // Grep: debounce the query, then hit each root in parallel.
   const [debouncedGrepQuery, setDebouncedGrepQuery] = createSignal("");
   let grepTimer: ReturnType<typeof setTimeout> | undefined;
   createEffect(() => {
@@ -41,20 +65,37 @@ export default function CommandPalette(props: Props) {
     grepTimer = setTimeout(() => setDebouncedGrepQuery(q), 180);
   });
 
-  const [grepResults] = createResource<GrepMatch[], string>(
+  const [grepResults] = createResource<MatchEntry[], string>(
     () => (props.mode === "grep" ? debouncedGrepQuery() : ""),
     async (q) => {
       if (!q || q.length < 2) return [];
-      return fsGrep(props.root, q);
+      const out: MatchEntry[] = [];
+      const results = await Promise.all(
+        props.roots.map((root) =>
+          fsGrep(root, q).then(
+            (rs) => ({ root, rs }),
+            (e) => {
+              console.error("[palette] fsGrep failed for", root, e);
+              return { root, rs: [] as GrepMatch[] };
+            },
+          ),
+        ),
+      );
+      for (const { root, rs } of results) {
+        for (const m of rs) out.push({ ...m, root });
+      }
+      return out;
     },
   );
 
+  const showRootLabel = () => props.roots.length > 1;
+
   const filteredFiles = createMemo(() => {
-    if (props.mode !== "files") return [];
+    if (props.mode !== "files") return [] as FileEntry[];
     const all = files() ?? [];
     const q = query().toLowerCase();
     if (!q) return all.slice(0, 200);
-    return all.filter((p) => p.toLowerCase().includes(q)).slice(0, 200);
+    return all.filter((f) => f.rel.toLowerCase().includes(q)).slice(0, 200);
   });
 
   const total = createMemo(() => {
@@ -62,7 +103,6 @@ export default function CommandPalette(props: Props) {
     return (grepResults() ?? []).length;
   });
 
-  // Reset cursor whenever the result set churns.
   createEffect(() => {
     void total();
     setCursor(0);
@@ -102,14 +142,14 @@ export default function CommandPalette(props: Props) {
 
   function pickCurrent() {
     if (props.mode === "files") {
-      const rel = filteredFiles()[cursor()];
-      if (!rel) return;
-      openFileInEditor(joinPath(props.root, rel));
+      const f = filteredFiles()[cursor()];
+      if (!f) return;
+      openFileInEditor(joinPath(f.root, f.rel));
       props.onClose();
     } else {
       const m = (grepResults() ?? [])[cursor()];
       if (!m) return;
-      openFileInEditor(joinPath(props.root, m.path), m.line);
+      openFileInEditor(joinPath(m.root, m.path), m.line);
       props.onClose();
     }
   }
@@ -124,6 +164,9 @@ export default function CommandPalette(props: Props) {
       <div class="mt-20 w-[640px] max-w-[90vw] overflow-hidden rounded-lg border border-white/10 bg-[#0e1116] shadow-2xl">
         <div class="flex items-center gap-2 border-b border-white/5 px-3 py-2 text-xs uppercase tracking-wider text-white/40">
           {props.mode === "files" ? "find file" : "search in files"}
+          <Show when={showRootLabel()}>
+            <span class="text-white/30">· {props.roots.length} roots</span>
+          </Show>
           <span class="ml-auto text-white/30">esc to close</span>
         </div>
         <input
@@ -140,7 +183,7 @@ export default function CommandPalette(props: Props) {
         <ul class="max-h-[420px] overflow-y-auto border-t border-white/5">
           <Show when={props.mode === "files"}>
             <For each={filteredFiles()}>
-              {(rel, i) => (
+              {(f, i) => (
                 <li>
                   <button
                     class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-white/5"
@@ -148,9 +191,12 @@ export default function CommandPalette(props: Props) {
                     onMouseEnter={() => setCursor(i())}
                     onClick={pickCurrent}
                   >
-                    <span class="truncate text-white/90">{basename(rel)}</span>
+                    <span class="truncate text-white/90">{basename(f.rel)}</span>
                     <span class="ml-auto truncate text-[11px] text-white/40">
-                      {dirname(rel)}
+                      <Show when={showRootLabel()}>
+                        <span class="text-white/55">{basename(f.root)}/</span>
+                      </Show>
+                      {dirname(f.rel)}
                     </span>
                   </button>
                 </li>
@@ -168,6 +214,9 @@ export default function CommandPalette(props: Props) {
                     onClick={pickCurrent}
                   >
                     <span class="text-[11px] text-white/40">
+                      <Show when={showRootLabel()}>
+                        <span class="text-white/55">{basename(m.root)}/</span>
+                      </Show>
                       {m.path}:{m.line}
                     </span>
                     <span class="line-clamp-1 w-full truncate text-white/85">
@@ -191,7 +240,7 @@ export default function CommandPalette(props: Props) {
 }
 
 function basename(p: string): string {
-  const i = p.lastIndexOf("/");
+  const i = p.replace(/\/+$/, "").lastIndexOf("/");
   return i >= 0 ? p.slice(i + 1) : p;
 }
 function dirname(p: string): string {

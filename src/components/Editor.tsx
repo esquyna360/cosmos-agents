@@ -18,7 +18,7 @@ import { fsReadFile, fsWriteFile } from "../lib/fs";
 import { editorOpenRequest } from "../stores/agents";
 
 interface Props {
-  root: string;
+  roots: string[];
 }
 
 const AUTOSAVE_MS = 800;
@@ -207,7 +207,7 @@ export default function Editor(props: Props) {
         </div>
         <div class="min-h-0 flex-1 overflow-y-auto">
           <FileTree
-            root={props.root}
+            roots={props.roots}
             onOpenFile={openFile}
             selectedPath={activePath()}
           />

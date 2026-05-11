@@ -2,6 +2,7 @@ mod fs_ops;
 mod pty_supervisor;
 mod status_fsm;
 mod store;
+mod workspaces;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -12,6 +13,7 @@ use tauri::{
     ipc::{Channel, InvokeResponseBody},
     AppHandle, Manager, State,
 };
+use workspaces::WorkspaceRecord;
 
 fn now_unix() -> i64 {
     SystemTime::now()
@@ -216,6 +218,121 @@ fn agents_delete(store: State<'_, Store>, id: String) -> Result<(), String> {
     store.delete(&id).map_err(|e| e.to_string())
 }
 
+fn home_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path().home_dir().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn workspaces_list(
+    app: AppHandle,
+    store: State<'_, Store>,
+) -> Result<Vec<WorkspaceRecord>, String> {
+    let home = home_dir(&app)?;
+    workspaces::list(&store, &home).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn workspaces_create(
+    app: AppHandle,
+    store: State<'_, Store>,
+    name: String,
+    folders: Vec<String>,
+    memory: String,
+) -> Result<WorkspaceRecord, String> {
+    let home = home_dir(&app)?;
+    let folders = workspaces::dedupe_folders(folders);
+    if folders.is_empty() {
+        return Err("at least one folder is required".into());
+    }
+    let id = uuid_v4();
+    let rec = WorkspaceRecord {
+        id: id.clone(),
+        name: name.trim().to_string(),
+        folders: folders.clone(),
+        memory,
+        cwd: workspaces::workspace_dir(&home, &id)
+            .to_string_lossy()
+            .into_owned(),
+        created_at: now_unix(),
+    };
+    let row = workspaces::record_to_row(&rec).map_err(|e| e.to_string())?;
+    store.workspaces_upsert(&row).map_err(|e| e.to_string())?;
+    workspaces::ensure_workspace_dir(&home, &rec.id, &rec.name, &rec.folders, &rec.memory)
+        .map_err(|e| e.to_string())?;
+    Ok(rec)
+}
+
+#[tauri::command]
+fn workspaces_update(
+    app: AppHandle,
+    store: State<'_, Store>,
+    id: String,
+    name: String,
+    folders: Vec<String>,
+    memory: String,
+) -> Result<WorkspaceRecord, String> {
+    let home = home_dir(&app)?;
+    let folders = workspaces::dedupe_folders(folders);
+    if folders.is_empty() {
+        return Err("at least one folder is required".into());
+    }
+    let existing = store
+        .workspaces_get(&id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "workspace not found".to_string())?;
+    let rec = WorkspaceRecord {
+        id: id.clone(),
+        name: name.trim().to_string(),
+        folders,
+        memory,
+        cwd: workspaces::workspace_dir(&home, &id)
+            .to_string_lossy()
+            .into_owned(),
+        created_at: existing.created_at,
+    };
+    let row = workspaces::record_to_row(&rec).map_err(|e| e.to_string())?;
+    store.workspaces_upsert(&row).map_err(|e| e.to_string())?;
+    workspaces::ensure_workspace_dir(&home, &rec.id, &rec.name, &rec.folders, &rec.memory)
+        .map_err(|e| e.to_string())?;
+    Ok(rec)
+}
+
+#[tauri::command]
+fn workspaces_delete(store: State<'_, Store>, id: String) -> Result<(), String> {
+    store.workspaces_delete(&id).map_err(|e| e.to_string())
+}
+
+/// Minimal UUID-v4 generator using OS randomness. Avoids adding the `uuid`
+/// crate just for one call site.
+fn uuid_v4() -> String {
+    use std::io::Read;
+    let mut bytes = [0u8; 16];
+    if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+        let _ = f.read_exact(&mut bytes);
+    } else {
+        // Fallback: pseudo-random from nanos. Not crypto-secure, but unique
+        // enough for a local workspace id.
+        let n = now_nanos();
+        for (i, b) in bytes.iter_mut().enumerate() {
+            *b = ((n >> (i * 4 % 64)) & 0xff) as u8;
+        }
+    }
+    bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+    bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+    )
+}
+
+fn now_nanos() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -264,6 +381,10 @@ pub fn run() {
             fs_claude_md,
             fs_save_temp_image,
             git_diff,
+            workspaces_list,
+            workspaces_create,
+            workspaces_update,
+            workspaces_delete,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

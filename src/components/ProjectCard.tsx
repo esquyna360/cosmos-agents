@@ -1,4 +1,4 @@
-import { For, Show } from "solid-js";
+import { For } from "solid-js";
 
 import type { ProjectView, AgentUI } from "../stores/agents";
 import { colorForPath } from "../lib/colorHash";
@@ -26,18 +26,6 @@ export default function ProjectCard(props: Props) {
         <span class="min-w-0 flex-1 truncate text-sm font-medium text-white/90">
           {props.project.displayName}
         </span>
-        <Show when={props.project.stacks.length > 0}>
-          <span class="flex shrink-0 gap-0.5">
-            {props.project.stacks.slice(0, 3).map((s) => (
-              <span
-                class="rounded px-1 text-[9px] font-medium leading-4 text-white"
-                style={{ "background-color": s.color, opacity: 0.85 }}
-              >
-                {s.label}
-              </span>
-            ))}
-          </span>
-        </Show>
         <span class="text-[10px] tabular-nums text-white/35">
           {props.project.agents.length} agent{props.project.agents.length === 1 ? "" : "s"}
         </span>

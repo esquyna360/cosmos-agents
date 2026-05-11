@@ -11,7 +11,7 @@ interface NodeState {
 }
 
 interface Props {
-  root: string;
+  roots: string[];
   onOpenFile: (path: string) => void;
   selectedPath: string | null;
 }
@@ -21,13 +21,32 @@ const ICON_SIZE = 14;
 export default function FileTree(props: Props) {
   return (
     <div class="flex flex-col overflow-y-auto px-1 py-1 text-[13px] leading-6 text-white/80">
-      <Directory
-        path={props.root}
-        depth={0}
-        initialOpen
-        onOpenFile={props.onOpenFile}
-        selectedPath={props.selectedPath}
-      />
+      <Show
+        when={props.roots.length > 1}
+        fallback={
+          <Directory
+            path={props.roots[0]}
+            depth={0}
+            initialOpen
+            forceHeader={false}
+            onOpenFile={props.onOpenFile}
+            selectedPath={props.selectedPath}
+          />
+        }
+      >
+        <For each={props.roots}>
+          {(r) => (
+            <Directory
+              path={r}
+              depth={0}
+              initialOpen={false}
+              forceHeader
+              onOpenFile={props.onOpenFile}
+              selectedPath={props.selectedPath}
+            />
+          )}
+        </For>
+      </Show>
     </div>
   );
 }
@@ -36,6 +55,8 @@ interface DirProps {
   path: string;
   depth: number;
   initialOpen?: boolean;
+  /** When true the root is rendered as a header even at depth 0 (multi-root). */
+  forceHeader?: boolean;
   onOpenFile: (path: string) => void;
   selectedPath: string | null;
 }
@@ -61,8 +82,20 @@ function Directory(props: DirProps) {
 
   if (props.initialOpen) ensureLoaded();
 
+  // Headerless mode (single-root, depth 0): just dump the entries flat.
+  if (props.depth === 0 && !props.forceHeader) {
+    return (
+      <EntryList
+        entries={state.entries}
+        depth={0}
+        onOpenFile={props.onOpenFile}
+        selectedPath={props.selectedPath}
+      />
+    );
+  }
+
   return (
-    <Show when={props.depth > 0} fallback={<EntryList entries={state.entries} depth={0} onOpenFile={props.onOpenFile} selectedPath={props.selectedPath} />}>
+    <>
       <RowButton
         depth={props.depth}
         onClick={() => {
@@ -81,7 +114,7 @@ function Directory(props: DirProps) {
           selectedPath={props.selectedPath}
         />
       </Show>
-    </Show>
+    </>
   );
 }
 

@@ -14,15 +14,31 @@ import CommandPalette, { type PaletteMode } from "./components/CommandPalette";
 import DiffView from "./components/DiffView";
 import ViewSwitcher from "./components/ViewSwitcher";
 import WorkflowView from "./components/WorkflowView";
+import AgentCreatorModal from "./components/AgentCreatorModal";
+import { loadWorkspaces, workspaceByCwd } from "./stores/workspaces";
+import { creator, openCreator, closeCreator } from "./stores/creator";
+
+/** Determines what folder roots the editor / palette / diff should target.
+ *  For folder agents that's the agent's cwd; for workspace agents it's the
+ *  workspace's user-picked folders. */
+function rootsFor(agentCwd: string): string[] {
+  const ws = workspaceByCwd().get(agentCwd.replace(/\/+$/, ""));
+  return ws ? ws.folders : [agentCwd];
+}
+
+function diffRootFor(agentCwd: string): string {
+  const ws = workspaceByCwd().get(agentCwd.replace(/\/+$/, ""));
+  return ws && ws.folders[0] ? ws.folders[0] : agentCwd;
+}
 import {
   agents,
   closeAgent,
+  createSiblingAgent,
   editorOpenRequest,
   focused,
   focusByIndex,
   focusedAgentId,
   loadFromDisk,
-  pickAndCreate,
   setStatus,
 } from "./stores/agents";
 import {
@@ -48,6 +64,7 @@ export default function App() {
 
   onMount(() => {
     loadFromDisk().catch(console.error);
+    loadWorkspaces().catch(console.error);
 
     let notifAllowed = false;
     isPermissionGranted()
@@ -99,7 +116,13 @@ export default function App() {
       }
       if (key === "t") {
         e.preventDefault();
-        pickAndCreate();
+        openCreator({ mode: "agent" });
+        return;
+      }
+      if (key === "n" && e.shiftKey) {
+        e.preventDefault();
+        const f = focused();
+        if (f) createSiblingAgent(f.cwd).catch(console.error);
         return;
       }
       if (key === "w") {
@@ -181,10 +204,10 @@ export default function App() {
                   </div>
                 </Show>
                 <Show when={view() === "editor"}>
-                  <Editor root={a.cwd} />
+                  <Editor roots={rootsFor(a.cwd)} />
                 </Show>
                 <Show when={view() === "diff"}>
-                  <DiffView root={a.cwd} />
+                  <DiffView root={diffRootFor(a.cwd)} />
                 </Show>
               </>
             )}
@@ -192,8 +215,15 @@ export default function App() {
           <Show when={palette() && focused()}>
             <CommandPalette
               mode={palette()!}
-              root={focused()!.cwd}
+              roots={rootsFor(focused()!.cwd)}
               onClose={() => setPalette(null)}
+            />
+          </Show>
+          <Show when={creator()}>
+            <AgentCreatorModal
+              initialMode={creator()!.mode}
+              initialWorkspace={creator()!.editing}
+              onClose={closeCreator}
             />
           </Show>
         </main>

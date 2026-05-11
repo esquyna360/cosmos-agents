@@ -11,14 +11,18 @@ import { colorForPath } from "../lib/colorHash";
 import StatusDot from "./StatusDot";
 import InlineEdit from "./InlineEdit";
 
+function basename(p: string): string {
+  const t = p.replace(/\/+$/, "");
+  const i = t.lastIndexOf("/");
+  return i >= 0 ? t.slice(i + 1) : t;
+}
+
 interface Props {
   agent: AgentUI;
   isFocused: boolean;
   indexHint?: number;
   /** Indent for project children; default 0. */
   indent?: number;
-  /** Show stack badges; false when nested inside a project group. */
-  showStacks?: boolean;
   onFocus: () => void;
   onClose: () => void;
 }
@@ -32,6 +36,13 @@ export default function AgentRow(props: Props) {
     return lines.join("\n").trim();
   };
   const autoEdit = () => pendingRenameId() === props.agent.id;
+  // When the user has set a custom name distinct from the folder basename,
+  // keep the folder name visible (subtle) so the source-of-truth isn't lost.
+  const folderHint = () => {
+    const display = agentDisplayName(props.agent);
+    const folder = basename(props.agent.cwd);
+    return display !== folder ? folder : null;
+  };
   return (
     <li
       class="group flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-white/5"
@@ -58,23 +69,18 @@ export default function AgentRow(props: Props) {
             }}
             onCancel={() => consumePendingRename(props.agent.id)}
           >
-            {(name) => <span class="truncate">{name}</span>}
+            {(name) => (
+              <span class="flex min-w-0 items-baseline gap-1.5 truncate">
+                <span class="truncate">{name}</span>
+                <Show when={folderHint()}>
+                  <span class="shrink-0 truncate text-[10px] text-white/30">
+                    {folderHint()}
+                  </span>
+                </Show>
+              </span>
+            )}
           </InlineEdit>
         </span>
-        <Show when={props.showStacks ?? true}>
-          <Show when={props.agent.stacks.length > 0}>
-            <span class="flex shrink-0 gap-0.5">
-              {props.agent.stacks.slice(0, 3).map((s) => (
-                <span
-                  class="rounded px-1 text-[9px] font-medium leading-4 text-white"
-                  style={{ "background-color": s.color, opacity: 0.85 }}
-                >
-                  {s.label}
-                </span>
-              ))}
-            </span>
-          </Show>
-        </Show>
         <Show when={props.agent.claudeMd}>
           <span class="shrink-0 text-[10px] text-white/35" title="has .claude/CLAUDE.md">
             ⚑

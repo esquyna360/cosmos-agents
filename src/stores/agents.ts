@@ -13,6 +13,7 @@ import {
   type AgentStatus,
 } from "../lib/ipc";
 import { fsClaudeMd, fsDetectStack, type StackInfo } from "../lib/fs";
+import { workspaceByCwd } from "./workspaces";
 
 export interface AgentUI extends AgentRecord {
   /** Whether a PTY process is currently running for this agent. */
@@ -22,8 +23,12 @@ export interface AgentUI extends AgentRecord {
   claudeMd: string | null;
 }
 
+export type ProjectKind = "folder" | "workspace";
+
 export interface ProjectView {
   cwd: string;
+  kind: ProjectKind;
+  workspaceId?: string;
   displayName: string;
   agents: AgentUI[];
   collapsed: boolean;
@@ -114,14 +119,18 @@ export const editorOpenRequest = requestedOpenFile;
 
 /** Per-project view derived from the flat agent list. Newest project first. */
 export const projects = createMemo<ProjectView[]>(() => {
+  const wsIndex = workspaceByCwd();
   const seen = new Map<string, ProjectView>();
   for (const a of state.list) {
     const cwd = canonical(a.cwd);
     let p = seen.get(cwd);
     if (!p) {
+      const ws = wsIndex.get(cwd);
       p = {
         cwd,
-        displayName: projectNames()[cwd] ?? basenameOf(cwd),
+        kind: ws ? "workspace" : "folder",
+        workspaceId: ws?.id,
+        displayName: ws ? ws.name : projectNames()[cwd] ?? basenameOf(cwd),
         agents: [],
         collapsed: !!collapsedMap()[cwd],
         stacks: a.stacks,
