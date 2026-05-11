@@ -1,4 +1,4 @@
-import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, onCleanup, onMount, Show } from "solid-js";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   isPermissionGranted,
@@ -11,6 +11,9 @@ import Terminal from "./components/Terminal";
 import Editor from "./components/Editor";
 import InputBar from "./components/InputBar";
 import CommandPalette, { type PaletteMode } from "./components/CommandPalette";
+import DiffView from "./components/DiffView";
+import ViewSwitcher from "./components/ViewSwitcher";
+import WorkflowView from "./components/WorkflowView";
 import {
   agents,
   closeAgent,
@@ -22,25 +25,21 @@ import {
   pickAndCreate,
   setStatus,
 } from "./stores/agents";
+import {
+  composerVisible,
+  cycleView,
+  setView,
+  setWorkflowOpen,
+  toggleComposer,
+  toggleWorkflow,
+  view,
+  workflowOpen,
+} from "./stores/layout";
+import { createSignal } from "solid-js";
 import type { AgentStatus } from "./lib/ipc";
 
-const VIEW_PREF_KEY = "cosmos.view";
-
-type ViewMode = "terminal" | "editor";
-
 export default function App() {
-  const [view, setViewRaw] = createSignal<ViewMode>(
-    (localStorage.getItem(VIEW_PREF_KEY) as ViewMode) || "terminal",
-  );
   const [palette, setPalette] = createSignal<PaletteMode | null>(null);
-
-  function setView(v: ViewMode) {
-    setViewRaw(v);
-    localStorage.setItem(VIEW_PREF_KEY, v);
-  }
-  function toggleView() {
-    setView(view() === "terminal" ? "editor" : "terminal");
-  }
 
   // Opening a file via palette/grep auto-switches to the editor.
   createEffect(() => {
@@ -50,7 +49,6 @@ export default function App() {
   onMount(() => {
     loadFromDisk().catch(console.error);
 
-    // Ask for notification permission once. macOS prompts the user.
     let notifAllowed = false;
     isPermissionGranted()
       .then(async (granted) => {
@@ -59,8 +57,6 @@ export default function App() {
       })
       .catch(() => {});
 
-    // Track previous status per agent so we can detect streaming → idle and
-    // only notify when the user isn't already looking at that agent.
     const prev = new Map<string, AgentStatus>();
 
     let unlistenStatus: UnlistenFn | undefined;
@@ -87,8 +83,20 @@ export default function App() {
     });
 
     const onKey = (e: KeyboardEvent) => {
+      // Workflow view has its own Escape shortcut and ignores most modifiers
+      // for typing safety.
+      if (e.key === "Escape" && workflowOpen()) {
+        e.preventDefault();
+        setWorkflowOpen(false);
+        return;
+      }
       if (!e.metaKey) return;
       const key = e.key.toLowerCase();
+      if (key === "d") {
+        e.preventDefault();
+        toggleWorkflow();
+        return;
+      }
       if (key === "t") {
         e.preventDefault();
         pickAndCreate();
@@ -102,7 +110,12 @@ export default function App() {
       }
       if (key === "e") {
         e.preventDefault();
-        toggleView();
+        cycleView();
+        return;
+      }
+      if (key === "i") {
+        e.preventDefault();
+        toggleComposer();
         return;
       }
       if (key === "p") {
@@ -138,8 +151,18 @@ export default function App() {
       <div class="relative flex min-h-0 min-w-0 flex-1">
         <Sidebar />
         <main class="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          <Show when={workflowOpen()}>
+            <WorkflowView />
+          </Show>
+          <Show when={!workflowOpen()}>
+            <Show when={focused()}>
+              <div class="shrink-0 border-b border-white/5">
+                <ViewSwitcher />
+              </div>
+            </Show>
+          </Show>
           <Show
-            when={focused()}
+            when={!workflowOpen() && focused()}
             fallback={
               <div class="flex flex-1 items-center justify-center text-white/30">
                 no agent — ⌘T to spawn
@@ -149,16 +172,19 @@ export default function App() {
           >
             {(a) => (
               <>
-                {/* Both views share the same area; we mount only the active one
-                    so hidden terminals don't fight the layout for size. */}
                 <Show when={view() === "terminal"}>
                   <div class="flex min-h-0 min-w-0 flex-1 flex-col">
                     <Terminal id={a.id} cwd={a.cwd} />
-                    <InputBar id={a.id} agentName={a.name} />
+                    <Show when={composerVisible()}>
+                      <InputBar id={a.id} agentName={a.name} />
+                    </Show>
                   </div>
                 </Show>
                 <Show when={view() === "editor"}>
                   <Editor root={a.cwd} />
+                </Show>
+                <Show when={view() === "diff"}>
+                  <DiffView root={a.cwd} />
                 </Show>
               </>
             )}

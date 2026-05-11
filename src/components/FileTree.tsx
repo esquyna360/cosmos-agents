@@ -2,6 +2,7 @@ import { createSignal, For, Show } from "solid-js";
 import { createStore } from "solid-js/store";
 
 import { fsReadDir, type DirEntry } from "../lib/fs";
+import { folderIcon, iconForFile } from "../lib/fileIcons";
 
 interface NodeState {
   entries: DirEntry[] | null;
@@ -14,6 +15,8 @@ interface Props {
   onOpenFile: (path: string) => void;
   selectedPath: string | null;
 }
+
+const ICON_SIZE = 14;
 
 export default function FileTree(props: Props) {
   return (
@@ -56,53 +59,50 @@ function Directory(props: DirProps) {
     }
   }
 
-  if (props.initialOpen) {
-    ensureLoaded();
-  }
-
-  function toggle() {
-    setState("open", !state.open);
-    if (state.open) ensureLoaded();
-  }
+  if (props.initialOpen) ensureLoaded();
 
   return (
-    <Show
-      when={props.depth > 0}
-      fallback={
-        <Show when={state.entries}>
-          <For each={state.entries!}>
-            {(e) => (
-              <Entry
-                entry={e}
-                depth={0}
-                onOpenFile={props.onOpenFile}
-                selectedPath={props.selectedPath}
-              />
-            )}
-          </For>
-        </Show>
-      }
-    >
-      <button
-        class="flex w-full items-center gap-1 truncate text-left hover:text-white"
-        style={{ "padding-left": `${props.depth * 12}px` }}
-        onClick={toggle}
+    <Show when={props.depth > 0} fallback={<EntryList entries={state.entries} depth={0} onOpenFile={props.onOpenFile} selectedPath={props.selectedPath} />}>
+      <RowButton
+        depth={props.depth}
+        onClick={() => {
+          setState("open", !state.open);
+          if (state.open) ensureLoaded();
+        }}
       >
-        <span class="inline-block w-3 text-white/40">{state.open ? "▾" : "▸"}</span>
+        <FolderGlyph open={state.open} />
         <span class="truncate">{basename(props.path)}</span>
-      </button>
-      <Show when={state.open && state.entries}>
-        <For each={state.entries!}>
-          {(e) => (
-            <Entry
-              entry={e}
-              depth={props.depth + 1}
-              onOpenFile={props.onOpenFile}
-              selectedPath={props.selectedPath}
-            />
-          )}
-        </For>
+      </RowButton>
+      <Show when={state.open}>
+        <EntryList
+          entries={state.entries}
+          depth={props.depth + 1}
+          onOpenFile={props.onOpenFile}
+          selectedPath={props.selectedPath}
+        />
       </Show>
+    </Show>
+  );
+}
+
+function EntryList(props: {
+  entries: DirEntry[] | null;
+  depth: number;
+  onOpenFile: (path: string) => void;
+  selectedPath: string | null;
+}) {
+  return (
+    <Show when={props.entries}>
+      <For each={props.entries!}>
+        {(e) => (
+          <Entry
+            entry={e}
+            depth={props.depth}
+            onOpenFile={props.onOpenFile}
+            selectedPath={props.selectedPath}
+          />
+        )}
+      </For>
     </Show>
   );
 }
@@ -116,7 +116,6 @@ interface EntryProps {
 
 function Entry(props: EntryProps) {
   const [open, setOpen] = createSignal(false);
-
   if (props.entry.isDir) {
     return (
       <NestedDir
@@ -132,19 +131,20 @@ function Entry(props: EntryProps) {
   }
 
   const isSelected = () => props.selectedPath === props.entry.path;
+  const { Icon, color } = iconForFile(props.entry.name);
   return (
-    <button
-      class="flex w-full items-center gap-1 truncate text-left text-white/70 hover:text-white"
-      classList={{ "bg-white/10 text-white": isSelected() }}
-      style={{ "padding-left": `${props.depth * 12 + 14}px` }}
+    <RowButton
+      depth={props.depth}
+      selected={isSelected()}
       onClick={() => props.onOpenFile(props.entry.path)}
     >
+      <Icon size={ICON_SIZE} class="shrink-0" style={{ color }} />
       <span class="truncate">{props.entry.name}</span>
-    </button>
+    </RowButton>
   );
 }
 
-interface NestedDirProps {
+function NestedDir(props: {
   path: string;
   name: string;
   depth: number;
@@ -152,11 +152,8 @@ interface NestedDirProps {
   setOpen: (v: boolean) => void;
   onOpenFile: (path: string) => void;
   selectedPath: string | null;
-}
-
-function NestedDir(props: NestedDirProps) {
+}) {
   const [entries, setEntries] = createSignal<DirEntry[] | null>(null);
-
   async function ensureLoaded() {
     if (entries() !== null) return;
     try {
@@ -167,22 +164,19 @@ function NestedDir(props: NestedDirProps) {
     }
   }
 
-  function toggle() {
-    const next = !props.open;
-    props.setOpen(next);
-    if (next) ensureLoaded();
-  }
-
   return (
     <>
-      <button
-        class="flex w-full items-center gap-1 truncate text-left text-white/80 hover:text-white"
-        style={{ "padding-left": `${props.depth * 12}px` }}
-        onClick={toggle}
+      <RowButton
+        depth={props.depth}
+        onClick={() => {
+          const next = !props.open;
+          props.setOpen(next);
+          if (next) ensureLoaded();
+        }}
       >
-        <span class="inline-block w-3 text-white/40">{props.open ? "▾" : "▸"}</span>
+        <FolderGlyph open={props.open} />
         <span class="truncate">{props.name}</span>
-      </button>
+      </RowButton>
       <Show when={props.open && entries()}>
         <For each={entries()!}>
           {(e) => (
@@ -196,6 +190,29 @@ function NestedDir(props: NestedDirProps) {
         </For>
       </Show>
     </>
+  );
+}
+
+function FolderGlyph(props: { open: boolean }) {
+  const { Icon, color } = folderIcon(props.open);
+  return <Icon size={ICON_SIZE} class="shrink-0" style={{ color }} />;
+}
+
+function RowButton(props: {
+  depth: number;
+  selected?: boolean;
+  onClick: () => void;
+  children: any;
+}) {
+  return (
+    <button
+      class="flex w-full items-center gap-1.5 truncate rounded px-1 text-left text-white/75 hover:bg-white/5 hover:text-white"
+      classList={{ "bg-white/10 text-white": props.selected }}
+      style={{ "padding-left": `${props.depth * 12 + 4}px` }}
+      onClick={props.onClick}
+    >
+      {props.children}
+    </button>
   );
 }
 

@@ -133,6 +133,35 @@ fn fs_claude_md(cwd: String) -> Option<String> {
 /// Receives image bytes as a raw IPC body (no JSON serialization), writes them
 /// to a unique file under the OS temp dir, and returns the absolute path so the
 /// caller can hand it to Claude via `@/path` syntax.
+/// Run `git diff --no-color` in the agent's cwd. Returns the diff text on
+/// success, or an error string (typically "not a git repository") that the
+/// frontend renders as an empty state.
+#[tauri::command]
+async fn git_diff(cwd: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let out = std::process::Command::new("git")
+            .args(["-C", &cwd, "diff", "--no-color"])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            return Err(String::from_utf8_lossy(&out.stderr).into_owned());
+        }
+        let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+        const CAP: usize = 1024 * 1024;
+        if text.len() > CAP {
+            let mut end = CAP;
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            text.truncate(end);
+            text.push_str("\n\n…(diff truncated to 1 MiB)");
+        }
+        Ok(text)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 fn fs_save_temp_image(request: tauri::ipc::Request<'_>) -> Result<String, String> {
     let bytes = match request.body() {
@@ -234,6 +263,7 @@ pub fn run() {
             fs_detect_stack,
             fs_claude_md,
             fs_save_temp_image,
+            git_diff,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
