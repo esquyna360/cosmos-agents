@@ -26,7 +26,32 @@ const [workflowOpen, setWorkflowOpenRaw] = createSignal<boolean>(
   readBool(WORKFLOW_KEY, false),
 );
 
-export { view, composerVisible, workflowOpen };
+const SECONDARY_KEY = "cosmos.split.secondaryAgentId";
+const SPLIT_WIDTH_KEY = "cosmos.split.width";
+
+const [secondaryAgentId, setSecondaryAgentIdRaw] = createSignal<string | null>(
+  localStorage.getItem(SECONDARY_KEY),
+);
+const [splitWidthPct, setSplitWidthPctRaw] = createSignal<number>(
+  Number(localStorage.getItem(SPLIT_WIDTH_KEY)) || 38,
+);
+
+// Toggled from InputBar when the textarea gains/loses focus. App reads it to
+// hide the terminal so the composer can claim the full pane height.
+const [composerExpanded, setComposerExpandedRaw] = createSignal<boolean>(false);
+
+export {
+  view,
+  composerVisible,
+  workflowOpen,
+  secondaryAgentId,
+  splitWidthPct,
+  composerExpanded,
+};
+
+export function setComposerExpanded(v: boolean): void {
+  setComposerExpandedRaw(v);
+}
 
 export function setView(v: ViewMode): void {
   setViewRaw(v);
@@ -55,4 +80,42 @@ export function setWorkflowOpen(v: boolean): void {
 
 export function toggleWorkflow(): void {
   setWorkflowOpen(!workflowOpen());
+}
+
+export function setSecondaryAgent(id: string | null): void {
+  setSecondaryAgentIdRaw(id);
+  if (id) localStorage.setItem(SECONDARY_KEY, id);
+  else localStorage.removeItem(SECONDARY_KEY);
+}
+
+export function togglePinSecondary(id: string): void {
+  setSecondaryAgent(secondaryAgentId() === id ? null : id);
+}
+
+/**
+ * Pinning an agent that is currently focused would render the same terminal
+ * on both sides — instead, pin it AND focus a different agent so the split
+ * becomes visible immediately. The caller passes the focused id and a
+ * fallback (next-other-agent) id.
+ */
+export function smartPin(
+  pinId: string,
+  focusedId: string | null,
+  fallbackFocusId: string | null,
+  setFocus: (id: string) => void,
+): void {
+  if (secondaryAgentId() === pinId) {
+    setSecondaryAgent(null);
+    return;
+  }
+  setSecondaryAgent(pinId);
+  if (pinId === focusedId && fallbackFocusId) {
+    setFocus(fallbackFocusId);
+  }
+}
+
+export function setSplitWidthPct(pct: number): void {
+  const clamped = Math.max(20, Math.min(70, pct));
+  setSplitWidthPctRaw(clamped);
+  localStorage.setItem(SPLIT_WIDTH_KEY, String(clamped));
 }

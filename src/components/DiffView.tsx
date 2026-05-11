@@ -11,26 +11,72 @@ import {
 import { gitDiff } from "../lib/git";
 
 interface Props {
+  roots: string[];
+}
+
+interface FolderDiff {
   root: string;
+  ok: boolean;
+  text: string;
+}
+
+function basename(p: string): string {
+  const t = p.replace(/\/+$/, "");
+  const i = t.lastIndexOf("/");
+  return i >= 0 ? t.slice(i + 1) : t;
 }
 
 export default function DiffView(props: Props) {
   const [reloadToken, bumpReload] = createSignal(0);
-  const [diff] = createResource(
-    () => ({ root: props.root, token: reloadToken() }),
-    async ({ root }) => {
-      try {
-        return { ok: true as const, text: await gitDiff(root) };
-      } catch (e) {
-        return { ok: false as const, err: String(e) };
-      }
+  // Walk each root in parallel. For workspaces this gives a concatenated view
+  // of every git repo's pending changes, headed by a folder marker line.
+  const [diffs] = createResource(
+    () => ({ roots: props.roots.join("|"), token: reloadToken() }),
+    async () => {
+      const results: FolderDiff[] = await Promise.all(
+        props.roots.map(async (root) => {
+          try {
+            const text = await gitDiff(root);
+            return { root, ok: true, text };
+          } catch (e) {
+            return { root, ok: false, text: String(e) };
+          }
+        }),
+      );
+      return results;
     },
   );
+
+  const combinedDoc = () => {
+    const list = diffs();
+    if (!list) return null;
+    if (list.length === 1) return list[0].ok ? list[0].text : null;
+    // Multi-root: separator + folder marker before each diff body. The
+    // separator line uses `### ` so the diff highlighter paints it as meta.
+    const parts: string[] = [];
+    for (const d of list) {
+      parts.push(`### ${basename(d.root)} (${d.root})`);
+      if (d.ok) {
+        parts.push(d.text.trim().length === 0 ? "(no changes)" : d.text);
+      } else {
+        parts.push(`-- not a git repository --`);
+      }
+      parts.push("");
+    }
+    return parts.join("\n");
+  };
+
+  const allFailed = () => {
+    const list = diffs();
+    return !!list && list.length > 0 && list.every((d) => !d.ok);
+  };
 
   return (
     <div class="flex min-h-0 min-w-0 flex-1 flex-col bg-[#0b0d10]">
       <div class="flex h-7 shrink-0 items-center justify-between border-b border-white/5 px-3 text-[11px] text-white/40">
-        <span class="truncate">git diff · {props.root}</span>
+        <span class="truncate">
+          git diff · {props.roots.length === 1 ? props.roots[0] : `${props.roots.length} roots`}
+        </span>
         <button
           class="rounded px-2 py-0.5 text-white/60 hover:bg-white/10 hover:text-white"
           onClick={() => bumpReload(reloadToken() + 1)}
@@ -40,26 +86,28 @@ export default function DiffView(props: Props) {
         </button>
       </div>
       <Show
-        when={diff()}
+        when={diffs()}
         fallback={
           <div class="flex flex-1 items-center justify-center text-white/30">
             loading diff…
           </div>
         }
-        keyed
       >
-        {(d) =>
-          d.ok ? (
-            <DiffEditor doc={d.text} />
-          ) : (
+        <Show
+          when={!allFailed() && combinedDoc() !== null}
+          fallback={
             <div class="flex flex-1 items-center justify-center p-6 text-center text-white/40">
               <div>
                 <p class="mb-2 text-sm text-white/60">no diff available</p>
-                <p class="text-[11px]">{d.err}</p>
+                <p class="text-[11px]">
+                  {diffs()?.find((d) => !d.ok)?.text ?? "none of the roots are git repositories"}
+                </p>
               </div>
             </div>
-          )
-        }
+          }
+        >
+          <DiffEditor doc={combinedDoc() ?? ""} />
+        </Show>
       </Show>
     </div>
   );

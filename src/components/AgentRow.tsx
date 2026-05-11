@@ -1,13 +1,18 @@
 import { Show } from "solid-js";
+import { PanelRight } from "lucide-solid";
 
 import type { AgentUI } from "../stores/agents";
 import {
   agentDisplayName,
+  agents,
   consumePendingRename,
+  focus,
+  focusedAgentId,
   pendingRenameId,
   renameAgent,
 } from "../stores/agents";
 import { colorForPath } from "../lib/colorHash";
+import { secondaryAgentId, smartPin } from "../stores/layout";
 import StatusDot from "./StatusDot";
 import InlineEdit from "./InlineEdit";
 
@@ -91,6 +96,22 @@ export default function AgentRow(props: Props) {
             ⌘{props.indexHint! + 1}
           </span>
         </Show>
+      </button>
+      <button
+        class="flex shrink-0 items-center rounded p-1 hover:bg-white/10"
+        classList={{
+          "text-white/75": secondaryAgentId() === props.agent.id,
+          "text-white/25 hover:text-white/80":
+            secondaryAgentId() !== props.agent.id,
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+          const fallback = agents.list.find((x) => x.id !== props.agent.id)?.id ?? null;
+          smartPin(props.agent.id, focusedAgentId(), fallback, focus);
+        }}
+        title={secondaryAgentId() === props.agent.id ? "unpin from side" : "pin to side"}
+      >
+        <PanelRight size={12} />
       </button>
       <button
         class="hidden shrink-0 text-white/40 hover:text-white/80 group-hover:inline"

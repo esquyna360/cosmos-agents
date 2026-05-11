@@ -80,7 +80,7 @@ export default function Sidebar() {
       <div class="border-t border-white/5 px-3 py-2 text-[10px] leading-relaxed text-white/30">
         ⌘T new · ⌘⇧N sibling · ⌘W close<br />
         ⌘E view · ⌘I composer · ⌘D workflow<br />
-        ⌘P file · ⌘⇧F search · ⌘1–9 focus
+        ⌘\ pin · ⌘P file · ⌘⇧F search · ⌘1–9 focus
       </div>
     </aside>
   );
@@ -88,16 +88,17 @@ export default function Sidebar() {
 
 function SectionHeader(props: { label: string; onAdd: () => void; addTitle: string }) {
   return (
-    <li class="flex items-center justify-between px-1 pb-1 pt-2">
-      <span class="text-[10px] font-medium uppercase tracking-wider text-white/40">
+    <li class="flex items-center justify-between px-1 pb-1 pt-3">
+      <span class="text-[10px] font-medium uppercase tracking-wider text-white/45">
         {props.label}
       </span>
       <button
-        class="rounded px-1.5 text-sm leading-none text-white/55 hover:bg-white/10 hover:text-white"
+        class="flex items-center gap-1 rounded border border-white/10 px-2 py-0.5 text-[11px] text-white/70 hover:border-white/25 hover:bg-white/10 hover:text-white"
         onClick={props.onAdd}
         title={props.addTitle}
       >
-        +
+        <span class="leading-none">+</span>
+        <span>new</span>
       </button>
     </li>
   );
