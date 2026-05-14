@@ -7,32 +7,6 @@ export type AgentStatus =
   | "tool_running"
   | "error";
 
-export interface AgentRecord {
-  id: string;
-  name: string;
-  cwd: string;
-  createdAt: number;
-  lastActive: number;
-}
-
-interface AgentRecordSnake {
-  id: string;
-  name: string;
-  cwd: string;
-  created_at: number;
-  last_active: number;
-}
-
-function toCamel(r: AgentRecordSnake): AgentRecord {
-  return {
-    id: r.id,
-    name: r.name,
-    cwd: r.cwd,
-    createdAt: r.created_at,
-    lastActive: r.last_active,
-  };
-}
-
 export interface SpawnOpts {
   id: string;
   cwd: string;
@@ -40,6 +14,10 @@ export interface SpawnOpts {
   args: string[];
   cols: number;
   rows: number;
+  /** Routes events back to the right project on the runner-status channel. */
+  projectId?: string;
+  /** "agent" | "shell". Defaults to "agent" server-side. */
+  kind?: "agent" | "shell";
 }
 
 export function ptySpawn(opts: SpawnOpts): Promise<void> {
@@ -85,22 +63,4 @@ export function ptyLiveIds(): Promise<string[]> {
 
 export function debugLog(msg: string): void {
   invoke("debug_log", { msg }).catch(() => {});
-}
-
-export async function agentsList(): Promise<AgentRecord[]> {
-  const rows = await invoke<AgentRecordSnake[]>("agents_list");
-  return rows.map(toCamel);
-}
-
-export async function agentsUpsert(
-  id: string,
-  name: string,
-  cwd: string,
-): Promise<AgentRecord> {
-  const r = await invoke<AgentRecordSnake>("agents_upsert", { id, name, cwd });
-  return toCamel(r);
-}
-
-export function agentsDelete(id: string): Promise<void> {
-  return invoke("agents_delete", { id });
 }

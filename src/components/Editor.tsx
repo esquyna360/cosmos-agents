@@ -15,7 +15,17 @@ import { python } from "@codemirror/lang-python";
 import FileTree from "./FileTree";
 import EditorTabs from "./EditorTabs";
 import { fsReadFile, fsWriteFile } from "../lib/fs";
-import { editorOpenRequest } from "../stores/agents";
+import {
+  deleteFileState,
+  editorOpenRequest,
+  focusedProject,
+  focusedProjectId,
+  getFileState,
+  setEditorActivePath,
+  setEditorDirty,
+  setEditorOpenPaths,
+  setFileState,
+} from "../stores/projects";
 
 interface Props {
   roots: string[];
@@ -24,29 +34,47 @@ interface Props {
 const AUTOSAVE_MS = 800;
 const MAX_OPEN_TABS = 12;
 
+// Save timers live per project so a debounced save survives a view switch.
+// (When Editor unmounts the timer keeps ticking; when it remounts we don't
+// re-create a duplicate timer because we look up by projectId+path.)
+const saveTimersByProject = new Map<
+  string,
+  Map<string, ReturnType<typeof setTimeout>>
+>();
+function getTimers(projectId: string): Map<string, ReturnType<typeof setTimeout>> {
+  let m = saveTimersByProject.get(projectId);
+  if (!m) {
+    m = new Map();
+    saveTimersByProject.set(projectId, m);
+  }
+  return m;
+}
+
 export default function Editor(props: Props) {
-  // Open files (in tab order) and which one is active.
-  const [openPaths, setOpenPaths] = createSignal<string[]>([]);
-  const [activePath, setActivePath] = createSignal<string | null>(null);
-  const [dirty, setDirty] = createSignal<Record<string, boolean>>({});
+  const projectId = () => focusedProjectId() ?? "";
+  // Slice the store-backed editor state for this project. Two reads per
+  // render but Solid caches, and it lets us avoid wiring a third store on
+  // each consumer.
+  const openPaths = () => focusedProject()?.editor.openPaths ?? [];
+  const activePath = () => focusedProject()?.editor.activePath ?? null;
+  const dirty = () => focusedProject()?.editor.dirty ?? {};
+
   const [saving, setSaving] = createSignal<Record<string, boolean>>({});
 
-  // Per-file CM6 state so switching tabs preserves cursor/selection.
-  const fileStates = new Map<string, EditorState>();
   let view: EditorView | undefined;
   let host!: HTMLDivElement;
-  const saveTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   function markDirty(path: string, isDirty: boolean) {
-    setDirty((d) => ({ ...d, [path]: isDirty }));
+    const pid = projectId();
+    if (pid) setEditorDirty(pid, path, isDirty);
   }
   function markSaving(path: string, on: boolean) {
     setSaving((d) => ({ ...d, [path]: on }));
   }
 
   async function flush(path: string) {
-    if (!view) return;
-    const state = fileStates.get(path);
+    const pid = projectId();
+    const state = getFileState<EditorState>(pid, path);
     if (!state) return;
     const text = state.doc.toString();
     markSaving(path, true);
@@ -61,16 +89,20 @@ export default function Editor(props: Props) {
   }
 
   function scheduleSave(path: string) {
+    const pid = projectId();
+    if (!pid) return;
     markDirty(path, true);
-    const prev = saveTimers.get(path);
+    const timers = getTimers(pid);
+    const prev = timers.get(path);
     if (prev) clearTimeout(prev);
-    saveTimers.set(
+    timers.set(
       path,
       setTimeout(() => flush(path), AUTOSAVE_MS),
     );
   }
 
   function buildState(doc: string, path: string): EditorState {
+    const pid = projectId();
     const exts: Extension[] = [
       lineNumbers(),
       highlightActiveLine(),
@@ -88,7 +120,7 @@ export default function Editor(props: Props) {
       }),
       EditorView.updateListener.of((u: ViewUpdate) => {
         if (u.docChanged) {
-          fileStates.set(path, u.state);
+          setFileState(pid, path, u.state);
           scheduleSave(path);
         }
       }),
@@ -99,37 +131,43 @@ export default function Editor(props: Props) {
   }
 
   async function ensureLoaded(path: string) {
-    if (fileStates.has(path)) return;
+    const pid = projectId();
+    if (getFileState(pid, path)) return;
     try {
       const text = await fsReadFile(path);
-      fileStates.set(path, buildState(text, path));
+      setFileState(pid, path, buildState(text, path));
     } catch (e) {
       console.error("[editor] open failed", e);
     }
   }
 
   async function openFile(path: string) {
+    const pid = projectId();
+    if (!pid) return;
     // Persist current edits before switching.
     const cur = activePath();
-    if (cur && view) fileStates.set(cur, view.state);
+    if (cur && view) setFileState(pid, cur, view.state);
     if (cur && dirty()[cur]) {
-      const t = saveTimers.get(cur);
+      const t = getTimers(pid).get(cur);
       if (t) clearTimeout(t);
       await flush(cur);
     }
     await ensureLoaded(path);
 
     batch(() => {
-      setOpenPaths((paths) => {
-        if (paths.includes(path)) return paths;
-        const next = [...paths, path];
-        return next.length > MAX_OPEN_TABS ? next.slice(next.length - MAX_OPEN_TABS) : next;
-      });
-      setActivePath(path);
+      const paths = openPaths();
+      let next = paths;
+      if (!paths.includes(path)) {
+        next = [...paths, path];
+        if (next.length > MAX_OPEN_TABS) {
+          next = next.slice(next.length - MAX_OPEN_TABS);
+        }
+        setEditorOpenPaths(pid, next);
+      }
+      setEditorActivePath(pid, path);
     });
 
-    // Drop the loaded state into the view.
-    const state = fileStates.get(path);
+    const state = getFileState<EditorState>(pid, path);
     if (state && view) {
       view.setState(state);
       view.focus();
@@ -137,32 +175,35 @@ export default function Editor(props: Props) {
   }
 
   async function closeFile(path: string) {
+    const pid = projectId();
+    if (!pid) return;
     if (dirty()[path]) {
-      const t = saveTimers.get(path);
+      const t = getTimers(pid).get(path);
       if (t) clearTimeout(t);
       await flush(path);
     }
-    fileStates.delete(path);
-    saveTimers.delete(path);
+    deleteFileState(pid, path);
+    getTimers(pid).delete(path);
 
     const wasActive = activePath() === path;
     const newPaths = openPaths().filter((p) => p !== path);
     batch(() => {
-      setOpenPaths(newPaths);
-      setDirty((d) => {
-        const n = { ...d };
-        delete n[path];
-        return n;
-      });
+      setEditorOpenPaths(pid, newPaths);
+      setEditorDirty(pid, path, false);
       if (wasActive) {
         const next = newPaths[newPaths.length - 1] ?? null;
-        setActivePath(next);
+        setEditorActivePath(pid, next);
         if (next && view) {
-          const s = fileStates.get(next);
+          const s = getFileState<EditorState>(pid, next);
           if (s) view.setState(s);
         } else if (view) {
-          // No tabs left — show empty state by mounting a blank readonly doc.
-          view.setState(EditorState.create({ doc: "", extensions: [EditorState.readOnly.of(true)] }));
+          // No tabs left — show empty state via a blank readonly doc.
+          view.setState(
+            EditorState.create({
+              doc: "",
+              extensions: [EditorState.readOnly.of(true)],
+            }),
+          );
         }
       }
     });
@@ -186,16 +227,36 @@ export default function Editor(props: Props) {
       state: EditorState.create({ doc: "", extensions: [EditorState.readOnly.of(true)] }),
       parent: host,
     });
+    // Rehydrate from persisted state on (re-)mount: if a path was active in
+    // this project's editor view, load it back into the visible CM6 view.
+    const pid = projectId();
+    const persistedActive = activePath();
+    if (pid && persistedActive) {
+      // For every previously-open path, lazy-load its content so its CM6
+      // state is in the map before the user clicks the tab. We only mount
+      // the active path into the visible view immediately.
+      Promise.all(openPaths().map(ensureLoaded)).then(() => {
+        const s = getFileState<EditorState>(pid, persistedActive);
+        if (s && view) {
+          view.setState(s);
+        }
+      });
+    }
   });
 
   onCleanup(() => {
-    for (const t of saveTimers.values()) clearTimeout(t);
-    saveTimers.clear();
-    // Best-effort flush remaining dirty files.
-    for (const p of Object.keys(dirty())) {
-      if (dirty()[p]) flush(p);
+    // Best-effort flush of dirty files. Timers stay in the per-project map
+    // and continue ticking even after unmount — that's intentional, so the
+    // file gets written even if Bruno switches view before AUTOSAVE_MS.
+    const pid = projectId();
+    if (pid) {
+      const d = dirty();
+      for (const p of Object.keys(d)) {
+        if (d[p]) flush(p);
+      }
     }
     view?.destroy();
+    view = undefined;
   });
 
   return (

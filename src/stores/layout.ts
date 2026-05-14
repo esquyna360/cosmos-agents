@@ -1,6 +1,6 @@
 import { createSignal } from "solid-js";
 
-export type ViewMode = "terminal" | "editor" | "diff";
+export type ViewMode = "runners" | "editor" | "diff" | "memory";
 
 const VIEW_KEY = "cosmos.view";
 const COMPOSER_KEY = "cosmos.composer.visible";
@@ -8,8 +8,11 @@ const WORKFLOW_KEY = "cosmos.workflow.open";
 
 function readView(): ViewMode {
   const v = localStorage.getItem(VIEW_KEY);
-  if (v === "editor" || v === "diff" || v === "terminal") return v;
-  return "terminal";
+  // Legacy value "terminal" maps to the new default. Cleanup of the stored
+  // key happens in projects.ts::migrateLegacyLocalStorage (v3 stamp).
+  if (v === "terminal") return "runners";
+  if (v === "editor" || v === "diff" || v === "memory" || v === "runners") return v;
+  return "runners";
 }
 function readBool(key: string, fallback: boolean): boolean {
   const v = localStorage.getItem(key);
@@ -28,12 +31,16 @@ const [workflowOpen, setWorkflowOpenRaw] = createSignal<boolean>(
 
 const SECONDARY_KEY = "cosmos.split.secondaryAgentId";
 const SPLIT_WIDTH_KEY = "cosmos.split.width";
+const SIDEBAR_WIDTH_KEY = "cosmos.sidebar.width";
 
 const [secondaryAgentId, setSecondaryAgentIdRaw] = createSignal<string | null>(
   localStorage.getItem(SECONDARY_KEY),
 );
 const [splitWidthPct, setSplitWidthPctRaw] = createSignal<number>(
   Number(localStorage.getItem(SPLIT_WIDTH_KEY)) || 38,
+);
+const [sidebarWidthPx, setSidebarWidthPxRaw] = createSignal<number>(
+  Number(localStorage.getItem(SIDEBAR_WIDTH_KEY)) || 240,
 );
 
 // Toggled from InputBar when the textarea gains/loses focus. App reads it to
@@ -46,6 +53,7 @@ export {
   workflowOpen,
   secondaryAgentId,
   splitWidthPct,
+  sidebarWidthPx,
   composerExpanded,
 };
 
@@ -59,7 +67,7 @@ export function setView(v: ViewMode): void {
 }
 
 export function cycleView(): void {
-  const order: ViewMode[] = ["terminal", "editor", "diff"];
+  const order: ViewMode[] = ["runners", "editor", "diff", "memory"];
   const i = order.indexOf(view());
   setView(order[(i + 1) % order.length]);
 }
@@ -118,4 +126,10 @@ export function setSplitWidthPct(pct: number): void {
   const clamped = Math.max(20, Math.min(70, pct));
   setSplitWidthPctRaw(clamped);
   localStorage.setItem(SPLIT_WIDTH_KEY, String(clamped));
+}
+
+export function setSidebarWidthPx(px: number): void {
+  const clamped = Math.max(160, Math.min(520, px));
+  setSidebarWidthPxRaw(clamped);
+  localStorage.setItem(SIDEBAR_WIDTH_KEY, String(clamped));
 }

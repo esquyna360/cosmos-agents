@@ -1,19 +1,23 @@
+mod clis;
 mod fs_ops;
+mod memory;
+mod projects;
 mod pty_supervisor;
 mod status_fsm;
 mod store;
-mod workspaces;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pty_supervisor::PtySupervisor;
+use clis::CliInfo;
+use memory::MemoryCard;
+use projects::{ProjectRecord, RunnerRecord};
+use pty_supervisor::{PtySupervisor, RunnerKind};
 use status_fsm::Status;
-use store::{AgentRecord, Store};
+use store::Store;
 use tauri::{
     ipc::{Channel, InvokeResponseBody},
     AppHandle, Manager, State,
 };
-use workspaces::WorkspaceRecord;
 
 fn now_unix() -> i64 {
     SystemTime::now()
@@ -23,6 +27,7 @@ fn now_unix() -> i64 {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn pty_spawn(
     app: AppHandle,
     sup: State<'_, PtySupervisor>,
@@ -32,9 +37,23 @@ fn pty_spawn(
     args: Vec<String>,
     cols: u16,
     rows: u16,
+    // Optional in Step 1 — old call sites (Terminal.tsx) don't pass these yet.
+    // When absent, runner is treated as a legacy agent with no project routing.
+    project_id: Option<String>,
+    kind: Option<String>,
 ) -> Result<(), String> {
-    sup.spawn(app, id, cwd, program, args, cols, rows)
+    let project_id = project_id.unwrap_or_default();
+    let kind = kind
+        .as_deref()
+        .map(RunnerKind::from_str)
+        .unwrap_or(RunnerKind::Agent);
+    sup.spawn(app, id, project_id, kind, cwd, program, args, cols, rows)
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn pty_kill_project(sup: State<'_, PtySupervisor>, project_id: String) -> Result<(), String> {
+    sup.kill_project(&project_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -82,11 +101,6 @@ fn pty_live_ids(sup: State<'_, PtySupervisor>) -> Vec<String> {
 }
 
 #[tauri::command]
-fn agents_list(store: State<'_, Store>) -> Result<Vec<AgentRecord>, String> {
-    store.list().map_err(|e| e.to_string())
-}
-
-#[tauri::command]
 fn debug_log(msg: String) {
     eprintln!("[js] {msg}");
 }
@@ -130,6 +144,21 @@ fn fs_detect_stack(cwd: String) -> Vec<fs_ops::StackInfo> {
 #[tauri::command]
 fn fs_claude_md(cwd: String) -> Option<String> {
     fs_ops::read_claude_md(cwd.into())
+}
+
+#[tauri::command]
+fn fs_read_package_scripts(folder: String) -> fs_ops::ScriptsInfo {
+    fs_ops::read_package_scripts(folder.into())
+}
+
+#[tauri::command]
+fn clis_detect() -> Vec<CliInfo> {
+    clis::detect()
+}
+
+#[tauri::command]
+fn clis_get(id: String) -> Option<CliInfo> {
+    clis::preset_by_id(&id)
 }
 
 /// Receives image bytes as a raw IPC body (no JSON serialization), writes them
@@ -194,112 +223,266 @@ fn fs_save_temp_image(request: tauri::ipc::Request<'_>) -> Result<String, String
     Ok(path.to_string_lossy().into_owned())
 }
 
-#[tauri::command]
-fn agents_upsert(
-    store: State<'_, Store>,
-    id: String,
-    name: String,
-    cwd: String,
-) -> Result<AgentRecord, String> {
-    let now = now_unix();
-    let rec = AgentRecord {
-        id,
-        name,
-        cwd,
-        created_at: now,
-        last_active: now,
-    };
-    store.upsert(&rec).map_err(|e| e.to_string())?;
-    Ok(rec)
-}
-
-#[tauri::command]
-fn agents_delete(store: State<'_, Store>, id: String) -> Result<(), String> {
-    store.delete(&id).map_err(|e| e.to_string())
-}
-
 fn home_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     app.path().home_dir().map_err(|e| e.to_string())
 }
 
+/* ----------------------------- projects ----------------------------- */
+
 #[tauri::command]
-fn workspaces_list(
-    app: AppHandle,
-    store: State<'_, Store>,
-) -> Result<Vec<WorkspaceRecord>, String> {
-    let home = home_dir(&app)?;
-    workspaces::list(&store, &home).map_err(|e| e.to_string())
+fn projects_list(store: State<'_, Store>) -> Result<Vec<ProjectRecord>, String> {
+    projects::list(&store).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn workspaces_create(
+fn projects_create(
     app: AppHandle,
     store: State<'_, Store>,
     name: String,
     folders: Vec<String>,
     memory: String,
-) -> Result<WorkspaceRecord, String> {
+) -> Result<ProjectRecord, String> {
     let home = home_dir(&app)?;
-    let folders = workspaces::dedupe_folders(folders);
+    let folders = projects::dedupe_folders(folders);
     if folders.is_empty() {
         return Err("at least one folder is required".into());
     }
+    let trimmed_name = name.trim().to_string();
+    if trimmed_name.is_empty() {
+        return Err("name is required".into());
+    }
+    if projects::name_exists(&store, &trimmed_name, None).map_err(|e| e.to_string())? {
+        return Err(format!("a project named \"{trimmed_name}\" already exists"));
+    }
     let id = uuid_v4();
-    let rec = WorkspaceRecord {
+    let slug = projects::dedupe_slug(&store, &projects::slugify(&trimmed_name))
+        .map_err(|e| e.to_string())?;
+    let cwd = projects::compute_project_cwd(&home, &slug, &folders)
+        .to_string_lossy()
+        .into_owned();
+    let rec = ProjectRecord {
         id: id.clone(),
-        name: name.trim().to_string(),
+        name: trimmed_name,
+        slug: slug.clone(),
         folders: folders.clone(),
         memory,
-        cwd: workspaces::workspace_dir(&home, &id)
-            .to_string_lossy()
-            .into_owned(),
+        cwd,
         created_at: now_unix(),
     };
-    let row = workspaces::record_to_row(&rec).map_err(|e| e.to_string())?;
-    store.workspaces_upsert(&row).map_err(|e| e.to_string())?;
-    workspaces::ensure_workspace_dir(&home, &rec.id, &rec.name, &rec.folders, &rec.memory)
+    let row = projects::record_to_row(&rec).map_err(|e| e.to_string())?;
+    store.projects_upsert(&row).map_err(|e| e.to_string())?;
+    projects::ensure_project_dir(&home, &rec.slug, &rec.name, &rec.folders, &rec.memory)
         .map_err(|e| e.to_string())?;
     Ok(rec)
 }
 
 #[tauri::command]
-fn workspaces_update(
+fn projects_update(
     app: AppHandle,
     store: State<'_, Store>,
     id: String,
     name: String,
     folders: Vec<String>,
     memory: String,
-) -> Result<WorkspaceRecord, String> {
+) -> Result<ProjectRecord, String> {
     let home = home_dir(&app)?;
-    let folders = workspaces::dedupe_folders(folders);
+    let folders = projects::dedupe_folders(folders);
     if folders.is_empty() {
         return Err("at least one folder is required".into());
     }
+    let trimmed_name = name.trim().to_string();
+    if trimmed_name.is_empty() {
+        return Err("name is required".into());
+    }
+    if projects::name_exists(&store, &trimmed_name, Some(&id)).map_err(|e| e.to_string())? {
+        return Err(format!("a project named \"{trimmed_name}\" already exists"));
+    }
     let existing = store
-        .workspaces_get(&id)
+        .projects_get(&id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "workspace not found".to_string())?;
-    let rec = WorkspaceRecord {
+        .ok_or_else(|| "project not found".to_string())?;
+    // Slug is sticky — keep the existing one. Renaming changes the label,
+    // never the on-disk path. See plan doc for rationale.
+    let slug = existing.slug.clone();
+    let cwd = projects::compute_project_cwd(&home, &slug, &folders)
+        .to_string_lossy()
+        .into_owned();
+    let rec = ProjectRecord {
         id: id.clone(),
-        name: name.trim().to_string(),
+        name: trimmed_name,
+        slug: slug.clone(),
         folders,
         memory,
-        cwd: workspaces::workspace_dir(&home, &id)
-            .to_string_lossy()
-            .into_owned(),
+        cwd,
         created_at: existing.created_at,
     };
-    let row = workspaces::record_to_row(&rec).map_err(|e| e.to_string())?;
-    store.workspaces_upsert(&row).map_err(|e| e.to_string())?;
-    workspaces::ensure_workspace_dir(&home, &rec.id, &rec.name, &rec.folders, &rec.memory)
+    let row = projects::record_to_row(&rec).map_err(|e| e.to_string())?;
+    store.projects_upsert(&row).map_err(|e| e.to_string())?;
+    projects::ensure_project_dir(&home, &rec.slug, &rec.name, &rec.folders, &rec.memory)
         .map_err(|e| e.to_string())?;
     Ok(rec)
 }
 
 #[tauri::command]
-fn workspaces_delete(store: State<'_, Store>, id: String) -> Result<(), String> {
-    store.workspaces_delete(&id).map_err(|e| e.to_string())
+fn projects_delete(
+    sup: State<'_, PtySupervisor>,
+    store: State<'_, Store>,
+    id: String,
+) -> Result<(), String> {
+    // Kill any live runners first so we don't leave orphan PTYs after the
+    // rows are gone.
+    sup.kill_project(&id).map_err(|e| e.to_string())?;
+    store.projects_delete(&id).map_err(|e| e.to_string())
+}
+
+/* ----------------------------- runners ----------------------------- */
+
+#[tauri::command]
+fn runners_list(store: State<'_, Store>) -> Result<Vec<RunnerRecord>, String> {
+    projects::runners_list(&store).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn runners_create(
+    store: State<'_, Store>,
+    project_id: String,
+    kind: String,
+    name: String,
+    program: Option<String>,
+    args: Option<Vec<String>>,
+    env: Option<std::collections::HashMap<String, String>>,
+) -> Result<RunnerRecord, String> {
+    let kind_clean = if kind == "shell" { "shell" } else { "agent" }.to_string();
+    let (default_program, default_args): (&str, &[&str]) = if kind_clean == "shell" {
+        (projects::DEFAULT_SHELL_PROGRAM, projects::DEFAULT_SHELL_ARGS)
+    } else {
+        (projects::DEFAULT_AGENT_PROGRAM, projects::DEFAULT_AGENT_ARGS)
+    };
+    let program = program.unwrap_or_else(|| default_program.to_string());
+    let args = args.unwrap_or_else(|| default_args.iter().map(|s| s.to_string()).collect());
+    let with_status_fsm = kind_clean == "agent";
+    let now = now_unix();
+    let rec = RunnerRecord {
+        id: uuid_v4(),
+        project_id,
+        kind: kind_clean,
+        name,
+        program,
+        args,
+        env: env.unwrap_or_default(),
+        with_status_fsm,
+        created_at: now,
+        last_active: now,
+    };
+    let row = projects::runner_record_to_row(&rec).map_err(|e| e.to_string())?;
+    store.runners_upsert(&row).map_err(|e| e.to_string())?;
+    Ok(rec)
+}
+
+#[tauri::command]
+fn runners_update(
+    store: State<'_, Store>,
+    id: String,
+    name: String,
+) -> Result<(), String> {
+    let all = projects::runners_list(&store).map_err(|e| e.to_string())?;
+    let mut found = all
+        .into_iter()
+        .find(|r| r.id == id)
+        .ok_or_else(|| "runner not found".to_string())?;
+    found.name = name;
+    found.last_active = now_unix();
+    let row = projects::runner_record_to_row(&found).map_err(|e| e.to_string())?;
+    store.runners_upsert(&row).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn runners_delete(
+    sup: State<'_, PtySupervisor>,
+    store: State<'_, Store>,
+    id: String,
+) -> Result<(), String> {
+    let _ = sup.kill(&id);
+    store.runners_delete(&id).map_err(|e| e.to_string())
+}
+
+/* ----------------------------- memory ----------------------------- */
+
+#[tauri::command]
+fn memories_list(
+    app: AppHandle,
+    store: State<'_, Store>,
+    project_id: String,
+) -> Result<Vec<MemoryCard>, String> {
+    let home = home_dir(&app)?;
+    let project = store
+        .projects_get(&project_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "project not found".to_string())?;
+    memory::list_cards(&home, &project.slug).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn memories_upsert(
+    app: AppHandle,
+    store: State<'_, Store>,
+    project_id: String,
+    card: MemoryCard,
+) -> Result<MemoryCard, String> {
+    let home = home_dir(&app)?;
+    let project_rec = store
+        .projects_get(&project_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "project not found".to_string())?;
+    let project = projects::row_to_record(project_rec).map_err(|e| e.to_string())?;
+    let mut card = card;
+    if card.id.is_empty() {
+        card.id = uuid_v4().chars().take(12).collect();
+    }
+    let now = now_unix();
+    if card.created_at == 0 {
+        card.created_at = now;
+    }
+    card.updated_at = now;
+    if card.kind.is_empty() {
+        card.kind = "note".to_string();
+    }
+    memory::upsert_card(&home, &project.slug, &card).map_err(|e| e.to_string())?;
+    // Auto-regen CLAUDE.md so pinned changes flow to Claude without a project
+    // edit. No-op for single-folder projects.
+    let _ = projects::refresh_claude_md(
+        &home,
+        &project.slug,
+        &project.name,
+        &project.folders,
+        &project.memory,
+    );
+    Ok(card)
+}
+
+#[tauri::command]
+fn memories_delete(
+    app: AppHandle,
+    store: State<'_, Store>,
+    project_id: String,
+    card_id: String,
+) -> Result<(), String> {
+    let home = home_dir(&app)?;
+    let project_rec = store
+        .projects_get(&project_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "project not found".to_string())?;
+    let project = projects::row_to_record(project_rec).map_err(|e| e.to_string())?;
+    memory::delete_card(&home, &project.slug, &card_id).map_err(|e| e.to_string())?;
+    let _ = projects::refresh_claude_md(
+        &home,
+        &project.slug,
+        &project.name,
+        &project.folders,
+        &project.memory,
+    );
+    Ok(())
 }
 
 /// Minimal UUID-v4 generator using OS randomness. Avoids adding the `uuid`
@@ -342,6 +525,11 @@ pub fn run() {
         .setup(|app| {
             let data_dir = app.path().app_local_data_dir()?;
             let store = Store::open(data_dir.join("cosmos.sqlite"))?;
+            let home = app
+                .path()
+                .home_dir()
+                .map_err(|e| Box::<dyn std::error::Error>::from(e.to_string()))?;
+            store.migrate(&home)?;
             app.manage(store);
 
             #[cfg(target_os = "macos")]
@@ -368,9 +556,6 @@ pub fn run() {
             pty_resize,
             pty_kill,
             pty_live_ids,
-            agents_list,
-            agents_upsert,
-            agents_delete,
             debug_log,
             fs_read_dir,
             fs_read_file,
@@ -379,12 +564,23 @@ pub fn run() {
             fs_grep,
             fs_detect_stack,
             fs_claude_md,
+            fs_read_package_scripts,
+            clis_detect,
+            clis_get,
             fs_save_temp_image,
             git_diff,
-            workspaces_list,
-            workspaces_create,
-            workspaces_update,
-            workspaces_delete,
+            projects_list,
+            projects_create,
+            projects_update,
+            projects_delete,
+            runners_list,
+            runners_create,
+            runners_update,
+            runners_delete,
+            pty_kill_project,
+            memories_list,
+            memories_upsert,
+            memories_delete,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -10,7 +10,7 @@ import {
 } from "solid-js";
 
 import { fsGrep, fsWalk, type GrepMatch } from "../lib/fs";
-import { openFileInEditor } from "../stores/agents";
+import { openFileInEditor } from "../stores/projects";
 
 export type PaletteMode = "files" | "grep";
 

@@ -30,3 +30,71 @@ body {
 .xterm-viewport {
   background-color: transparent !important;
 }
+
+/* MarkdownView rendered output. Tuned to match Cosmos dark theme — no
+   tailwind/typography plugin because it's overkill for the few elements we
+   actually need. */
+.cosmos-prose h1,
+.cosmos-prose h2,
+.cosmos-prose h3 {
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+  margin: 1.2em 0 0.4em;
+  line-height: 1.25;
+}
+.cosmos-prose h1 { font-size: 1.3em; }
+.cosmos-prose h2 { font-size: 1.15em; }
+.cosmos-prose h3 { font-size: 1em; color: rgba(255, 255, 255, 0.78); }
+.cosmos-prose p { margin: 0.5em 0; }
+.cosmos-prose strong { color: rgba(255, 255, 255, 0.97); font-weight: 600; }
+.cosmos-prose em { color: rgba(255, 255, 255, 0.78); font-style: italic; }
+.cosmos-prose a {
+  color: #6ec1ff;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.cosmos-prose a:hover { color: #9dd6ff; }
+.cosmos-prose ul, .cosmos-prose ol { padding-left: 1.4em; margin: 0.5em 0; }
+.cosmos-prose li { margin: 0.15em 0; }
+.cosmos-prose code {
+  font-family: "Fira Code", ui-monospace, monospace;
+  font-size: 0.9em;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  padding: 0.05em 0.35em;
+}
+.cosmos-prose pre {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 0.7em 0.9em;
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+.cosmos-prose pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+.cosmos-prose blockquote {
+  border-left: 2px solid rgba(255, 255, 255, 0.2);
+  padding-left: 0.8em;
+  color: rgba(255, 255, 255, 0.65);
+  margin: 0.5em 0;
+}
+.cosmos-prose hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 1em 0;
+}
+.cosmos-prose table {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+}
+.cosmos-prose th, .cosmos-prose td {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0.35em 0.6em;
+  font-size: 0.95em;
+}
+.cosmos-prose th { background: rgba(255, 255, 255, 0.04); }

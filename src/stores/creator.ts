@@ -1,10 +1,9 @@
 import { createSignal } from "solid-js";
 
-import type { Workspace } from "../lib/workspaces";
-
 export interface CreatorState {
-  mode: "agent" | "workspace";
-  editing?: Workspace;
+  mode: "project";
+  /** Edit-mode flag — load existing project's name/folders/memory. */
+  editingProjectId?: string;
 }
 
 const [state, setState] = createSignal<CreatorState | null>(null);

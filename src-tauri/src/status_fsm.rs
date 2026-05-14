@@ -10,6 +10,11 @@ pub enum Status {
     AwaitingInput,
     ToolRunning,
     Error,
+    /// Shell runners (no FSM) sit here while the PTY is alive.
+    Running,
+    /// PTY died. Emitted by the supervisor when the reader thread ends — for
+    /// both kinds. Distinct from Idle (which only means "between turns").
+    Exited,
 }
 
 /// Heuristic state machine that infers what an interactive CLI agent

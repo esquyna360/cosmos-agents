@@ -1,17 +1,16 @@
 import { For } from "solid-js";
 
-import type { ProjectView, AgentUI } from "../stores/agents";
+import type { ProjectUI, RunnerUI } from "../stores/projects";
 import { colorForPath } from "../lib/colorHash";
 import StatusDot from "./StatusDot";
-import { agentDisplayName } from "../stores/agents";
 
 interface Props {
-  project: ProjectView;
-  onPick: (agent: AgentUI) => void;
+  project: ProjectUI;
+  onPick: (project: ProjectUI, runner: RunnerUI) => void;
 }
 
 export default function ProjectCard(props: Props) {
-  const wide = () => props.project.agents.length > 1;
+  const wide = () => props.project.runners.length > 1;
   return (
     <article
       class="flex flex-col rounded-lg border border-white/8 bg-[#0e1116] p-3 transition hover:border-white/20"
@@ -24,34 +23,42 @@ export default function ProjectCard(props: Props) {
           live={props.project.promotedLive}
         />
         <span class="min-w-0 flex-1 truncate text-sm font-medium text-white/90">
-          {props.project.displayName}
+          {props.project.name}
         </span>
         <span class="text-[10px] tabular-nums text-white/35">
-          {props.project.agents.length} agent{props.project.agents.length === 1 ? "" : "s"}
+          {props.project.runners.length} runner
+          {props.project.runners.length === 1 ? "" : "s"}
         </span>
       </header>
       <ul
         class="grid gap-1.5"
         classList={{ "grid-cols-2": wide(), "grid-cols-1": !wide() }}
       >
-        <For each={sortByUrgency(props.project.agents)}>
-          {(a) => (
+        <For each={sortByUrgency(props.project.runners)}>
+          {(r) => (
             <li>
               <button
                 class="flex w-full items-start gap-2 rounded border border-transparent bg-white/[0.02] px-2 py-1.5 text-left text-[12px] hover:border-white/15 hover:bg-white/[0.05]"
-                onClick={() => props.onPick(a)}
+                onClick={() => props.onPick(props.project, r)}
               >
                 <span class="mt-1 shrink-0">
                   <StatusDot
-                    color={colorForPath(a.cwd)}
-                    status={a.status}
-                    live={a.live}
+                    color={colorForPath(props.project.cwd)}
+                    // Treat shell 'running' as idle visually.
+                    status={
+                      r.kind === "shell"
+                        ? r.live
+                          ? "idle"
+                          : "error"
+                        : (r.status as never)
+                    }
+                    live={r.live}
                   />
                 </span>
                 <span class="min-w-0 flex-1">
-                  <span class="block truncate text-white/90">{agentDisplayName(a)}</span>
+                  <span class="block truncate text-white/90">{r.name}</span>
                   <span class="block truncate text-[10px] text-white/40">
-                    {statusLabel(a.status)} · {formatAge(a.lastActive)}
+                    {statusLabel(r.status)} · {formatAge(r.lastActive)}
                   </span>
                 </span>
               </button>
@@ -63,12 +70,20 @@ export default function ProjectCard(props: Props) {
   );
 }
 
-const URGENCY = { awaiting_input: 4, error: 3, streaming: 2, tool_running: 2, idle: 1 } as const;
+const URGENCY: Record<string, number> = {
+  awaiting_input: 4,
+  error: 3,
+  streaming: 2,
+  tool_running: 2,
+  idle: 1,
+  running: 1,
+  exited: 0,
+};
 
-function sortByUrgency(list: AgentUI[]): AgentUI[] {
+function sortByUrgency(list: RunnerUI[]): RunnerUI[] {
   return [...list].sort(
     (a, b) =>
-      URGENCY[b.status] - URGENCY[a.status] ||
+      (URGENCY[b.status] ?? 0) - (URGENCY[a.status] ?? 0) ||
       (b.lastActive ?? 0) - (a.lastActive ?? 0),
   );
 }
@@ -83,6 +98,10 @@ function statusLabel(s: string): string {
       return "tool running";
     case "error":
       return "error";
+    case "running":
+      return "running";
+    case "exited":
+      return "exited";
     default:
       return "idle";
   }

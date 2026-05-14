@@ -5,17 +5,26 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { SearchAddon } from "@xterm/addon-search";
 
 import { ptyAttach, ptyDetach, ptyResize, ptySpawn, ptyWrite } from "../lib/ipc";
-import { markLive } from "../stores/agents";
+import { markRunnerLive } from "../stores/projects";
+import type { RunnerUI } from "../stores/projects";
 
 interface Props {
-  id: string;
+  runner: RunnerUI;
+  projectId: string;
   cwd: string;
 }
 
 export default function Terminal(props: Props) {
   let host!: HTMLDivElement;
-  const id = props.id;
+  const id = props.runner.id;
   const cwd = props.cwd;
+  const projectId = props.projectId;
+  // Snapshot the spawn config at mount time — if the runner is renamed the
+  // PTY shouldn't care. If the user changes program/args later (rare; not
+  // exposed in UI yet) we'd need a re-spawn anyway, which is a separate flow.
+  const program = props.runner.program;
+  const args = [...props.runner.args];
+  const kind = props.runner.kind;
 
   onMount(async () => {
     const term = new XTerm({
@@ -50,10 +59,11 @@ export default function Terminal(props: Props) {
 
     fit.fit();
 
-    // xterm.js sends \r for both Enter and Shift+Enter, so Claude treats both as
-    // submit. Intercept Shift+Enter and write a literal newline instead — most
-    // Ink-based CLIs (Claude included) read \r as submit and \n as inline newline.
-    // If a future Claude build stops accepting \n, swap to "\x1b\r" (Alt+Enter).
+    // xterm.js sends \r for both Enter and Shift+Enter, so Claude treats both
+    // as submit. Intercept Shift+Enter and write a literal newline instead —
+    // most Ink-based CLIs (Claude included) read \r as submit and \n as
+    // inline newline. If a future Claude build stops accepting \n, swap to
+    // "\x1b\r" (Alt+Enter).
     term.attachCustomKeyEventHandler((e) => {
       if (e.type === "keydown" && e.key === "Enter" && e.shiftKey) {
         ptyWrite(id, "\n").catch(console.error);
@@ -70,23 +80,24 @@ export default function Terminal(props: Props) {
       await ptyAttach(id, onChunk);
       await ptyResize(id, term.cols, term.rows).catch(() => {});
     } catch {
-      // Agent has no live PTY (likely restored from SQLite). Spawn one in-place
-      // using the same claude command as fresh agents.
+      // Runner has no live PTY (likely restored from SQLite). Spawn one
+      // in-place using the runner's persisted program/args — NOT a hardcoded
+      // claude command. This is the subtle revive bug we explicitly guard
+      // against: a kind='shell' runner restored after restart must come back
+      // as a shell, not Claude.
       try {
         await ptySpawn({
           id,
           cwd,
-          program: "/bin/zsh",
-          args: [
-            "-l",
-            "-c",
-            "exec env CLAUDE_CODE_NO_FLICKER=1 claude --dangerously-skip-permissions",
-          ],
+          program,
+          args,
           cols: term.cols,
           rows: term.rows,
+          projectId,
+          kind,
         });
         await ptyAttach(id, onChunk);
-        markLive(id, true);
+        markRunnerLive(id, true);
       } catch (e) {
         console.error("revive failed", e);
       }

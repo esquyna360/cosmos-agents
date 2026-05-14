@@ -1,25 +1,34 @@
 import { For, Show } from "solid-js";
 
-import { focus, projects, type AgentUI, type ProjectView } from "../stores/agents";
+import {
+  focusRunner,
+  projectsStore,
+  type ProjectUI,
+  type RunnerUI,
+} from "../stores/projects";
 import { setView, setWorkflowOpen } from "../stores/layout";
 import ProjectCard from "./ProjectCard";
 
-const URGENCY = {
+const URGENCY: Record<string, number> = {
   awaiting_input: 4,
   error: 3,
   streaming: 2,
   tool_running: 2,
   idle: 1,
-} as const;
+  running: 1,
+  exited: 0,
+};
 
-function sortProjects(list: ProjectView[]): ProjectView[] {
-  return [...list].sort((a, b) => URGENCY[b.promotedStatus] - URGENCY[a.promotedStatus]);
+function sortProjects(list: ProjectUI[]): ProjectUI[] {
+  return [...list].sort(
+    (a, b) => URGENCY[b.promotedStatus] - URGENCY[a.promotedStatus],
+  );
 }
 
 export default function WorkflowView() {
-  function onPick(a: AgentUI) {
-    focus(a.id);
-    setView("terminal");
+  function onPick(p: ProjectUI, r: RunnerUI) {
+    focusRunner(p.id, r.id);
+    setView("runners");
     setWorkflowOpen(false);
   }
   return (
@@ -28,7 +37,7 @@ export default function WorkflowView() {
         <div>
           <h1 class="text-base font-medium text-white/90">workflow</h1>
           <p class="text-[11px] text-white/40">
-            agents grouped by project · ⌘D or Esc to close
+            projects and runners · ⌘D or Esc to close
           </p>
         </div>
         <button
@@ -39,15 +48,15 @@ export default function WorkflowView() {
         </button>
       </div>
       <Show
-        when={projects().length > 0}
+        when={projectsStore.list.length > 0}
         fallback={
           <div class="flex flex-1 items-center justify-center text-white/30">
-            no agents — ⌘T to spawn
+            no projects — ⌘T to spawn
           </div>
         }
       >
         <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-          <For each={sortProjects(projects())}>
+          <For each={sortProjects(projectsStore.list)}>
             {(p) => <ProjectCard project={p} onPick={onPick} />}
           </For>
         </div>

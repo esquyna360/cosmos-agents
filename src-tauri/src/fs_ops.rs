@@ -205,3 +205,49 @@ fn truncate(s: &str, max: usize) -> String {
         format!("{}…", &s[..end])
     }
 }
+
+#[derive(Serialize, Clone)]
+pub struct ScriptsInfo {
+    /// One of "pnpm" | "yarn" | "bun" | "npm". Detected from lockfile; falls
+    /// back to npm when no lockfile is present.
+    pub package_manager: String,
+    /// (name, command) pairs from package.json's `scripts` block, preserving
+    /// definition order. Empty if no package.json or no scripts.
+    pub scripts: Vec<(String, String)>,
+}
+
+/// Detects the package manager + lists npm scripts for a single folder.
+/// Returns an empty list (not an error) when no package.json is present, so
+/// the frontend can call this for every folder of a project and merge.
+pub fn read_package_scripts(folder: PathBuf) -> ScriptsInfo {
+    let pkg_path = folder.join("package.json");
+    let scripts: Vec<(String, String)> = std::fs::read_to_string(&pkg_path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|v| v.get("scripts").cloned())
+        .and_then(|v| v.as_object().cloned())
+        .map(|map| {
+            map.into_iter()
+                .filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_string())))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Lockfile-based package manager detection. Order matters: pnpm/yarn/bun
+    // wins over npm even if package-lock.json is also present (the explicit
+    // lockfile is the more honest signal).
+    let pm = if folder.join("pnpm-lock.yaml").exists() {
+        "pnpm"
+    } else if folder.join("yarn.lock").exists() {
+        "yarn"
+    } else if folder.join("bun.lockb").exists() || folder.join("bun.lock").exists() {
+        "bun"
+    } else {
+        "npm"
+    };
+
+    ScriptsInfo {
+        package_manager: pm.to_string(),
+        scripts,
+    }
+}
