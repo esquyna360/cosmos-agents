@@ -455,7 +455,7 @@ function CardDetail(props: {
           title={
             card()?.pinned
               ? "unpin (won't auto-flow to Claude)"
-              : "pin (auto-flows to Claude for multi-folder projects)"
+              : "pin (auto-flows into the project CLAUDE.md)"
           }
         >
           {card()?.pinned ? <Pin size={13} /> : <PinOff size={13} />}
@@ -649,8 +649,8 @@ function EmptyDetail(props: { hasAnyCards: boolean; onNew: () => void }) {
               <code class="rounded bg-white/[0.06] px-1 py-0.5 text-[11px]">
                 ~/.cosmos/projects/&lt;slug&gt;/memories/
               </code>
-              . pinned cards auto-flow into the multi-folder CLAUDE.md so Claude
-              reads them on every turn.
+              . pinned cards auto-flow into the project's generated CLAUDE.md
+              so Claude reads them on every turn.
             </p>
             <button
               class="mt-1 flex items-center gap-1.5 rounded-md bg-white/15 px-3 py-1.5 text-[12.5px] font-medium text-white hover:bg-white/25"

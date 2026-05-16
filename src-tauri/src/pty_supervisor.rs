@@ -89,12 +89,17 @@ impl PtySupervisor {
         }
     }
 
+    /// Spawn a PTY for a runner. Injects `COSMOS_*` env vars + the cosmos CLI
+    /// dir on PATH so the agent inside can self-register siblings/projects
+    /// via the `cosmos` CLI. `project_slug` may be empty for legacy callers
+    /// that don't have one (e.g. pre-Step-1 shells).
     #[allow(clippy::too_many_arguments)]
-    pub fn spawn(
+    pub fn spawn_with_slug(
         &self,
         app: AppHandle,
         id: String,
         project_id: String,
+        project_slug: String,
         kind: RunnerKind,
         cwd: String,
         program: String,
@@ -120,6 +125,41 @@ impl PtySupervisor {
         }
         cmd.cwd(cwd);
         cmd.env("TERM", "xterm-256color");
+
+        // Inject the Cosmos self-reference channel: the spawned agent can run
+        // `cosmos runner add --project . --name foo` and the CLI uses these
+        // env vars to find the socket and resolve `.`. Empty project_slug =
+        // legacy spawn with no routing; we still set COSMOS_SOCKET because
+        // even bare shells may want to list projects.
+        if !project_id.is_empty() {
+            cmd.env("COSMOS_PROJECT_ID", &project_id);
+        }
+        if !project_slug.is_empty() {
+            cmd.env("COSMOS_PROJECT_SLUG", &project_slug);
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            cmd.env(
+                "COSMOS_SOCKET",
+                std::path::Path::new(&home)
+                    .join(".cosmos")
+                    .join("cosmos.sock")
+                    .to_string_lossy()
+                    .as_ref(),
+            );
+        }
+        // Prepend the cosmos CLI's own dir to PATH so `cosmos` resolves
+        // without the user having to symlink it anywhere. The CLI binary is
+        // built into the same dir as the app binary (target/{debug,release}/
+        // in dev, Contents/MacOS/ in a packaged .app).
+        if let Some(cli_dir) = cosmos_cli_dir() {
+            let prev = std::env::var("PATH").unwrap_or_default();
+            let new_path = if prev.is_empty() {
+                cli_dir.to_string_lossy().into_owned()
+            } else {
+                format!("{}:{}", cli_dir.display(), prev)
+            };
+            cmd.env("PATH", new_path);
+        }
 
         let child = pair.slave.spawn_command(cmd)?;
         drop(pair.slave);
@@ -315,6 +355,17 @@ impl Default for PtySupervisor {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Dir containing the `cosmos` CLI binary — same dir as the currently-running
+/// app binary (`target/{debug,release}/` in dev, `Contents/MacOS/` in a
+/// packaged .app). Returns None if `current_exe()` is unavailable, in which
+/// case PATH stays untouched.
+fn cosmos_cli_dir() -> Option<std::path::PathBuf> {
+    std::env::current_exe()
+        .ok()?
+        .parent()
+        .map(|p| p.to_path_buf())
 }
 
 fn emit_status(inner: &RunnerInner, status: Status) {

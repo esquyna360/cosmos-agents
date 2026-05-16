@@ -14,6 +14,12 @@ edition = "2021"
 name = "agent_dashboard_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+# Standalone CLI client. Connects to the running Cosmos app's Unix socket so
+# spawned agents can register new runners/projects from inside their PTY.
+[[bin]]
+name = "cosmos"
+path = "src/bin/cosmos.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -29,4 +35,5 @@ rusqlite = { version = "0.39.0", features = ["bundled"] }
 tauri-plugin-dialog = "2.7.1"
 window-vibrancy = "0.7.1"
 tauri-plugin-notification = "2.3.3"
+clap = { version = "4.5", features = ["derive"] }
 

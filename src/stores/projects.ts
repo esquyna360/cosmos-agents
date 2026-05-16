@@ -285,6 +285,35 @@ export async function loadProjects(): Promise<void> {
   }
 }
 
+/* --------------------------- external mutations -------------------------- */
+
+let unlistenChanges: UnlistenFn | null = null;
+
+/// Subscribe to backend events that signal a project/runner was created or
+/// modified outside of the UI (currently: `cosmos` CLI invocations from
+/// inside a spawned agent's PTY). Re-runs `loadProjects` to fold the new
+/// rows in. Cheap because loadProjects is two SQLite SELECTs + a fan-out.
+export async function attachExternalChangesListener(): Promise<void> {
+  if (unlistenChanges) return;
+  const handler = () => {
+    void loadProjects();
+  };
+  const u1 = await listen<{ reason?: string; projectId?: string }>(
+    "runners-changed",
+    handler,
+  );
+  const u2 = await listen<{ reason?: string }>("projects-changed", handler);
+  unlistenChanges = () => {
+    u1();
+    u2();
+  };
+}
+
+export function detachExternalChangesListener(): void {
+  unlistenChanges?.();
+  unlistenChanges = null;
+}
+
 /* --------------------------- runner-status events ------------------------ */
 
 let unlistenRunnerStatus: UnlistenFn | null = null;
@@ -450,7 +479,13 @@ export async function createRunnerInProject(
     program: opts?.program,
     args: opts?.args,
   });
-  const spawnCwd = opts?.cwd ?? project.cwd;
+  // Agents run from project.cwd (the synthetic ~/.cosmos/projects/<slug>/ dir)
+  // so they read the generated CLAUDE.md with pinned cards + @-included repo
+  // memory. Blank shells default to folders[0] — opening a terminal lands you
+  // in a real repo, not the synthetic dir. Scripts always pass cwd explicitly.
+  const defaultCwd =
+    kind === "shell" ? (project.folders[0] ?? project.cwd) : project.cwd;
+  const spawnCwd = opts?.cwd ?? defaultCwd;
   try {
     await ptySpawn({
       id: runner.id,

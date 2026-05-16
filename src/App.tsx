@@ -27,6 +27,7 @@ import RunnerTabs from "./components/RunnerTabs";
 import MemoryView from "./components/MemoryView";
 import { creator, openCreator, closeCreator } from "./stores/creator";
 import {
+  attachExternalChangesListener,
   attachRunnerStatusListener,
   closeProject,
   closeRunner,
@@ -87,6 +88,7 @@ export default function App() {
     migrateLegacyLocalStorage();
     loadProjects().catch(console.error);
     attachRunnerStatusListener().catch(console.error);
+    attachExternalChangesListener().catch(console.error);
     // Probe installed AI CLIs in the background — the result fills the
     // "+ agent" dropdown. Probe is cheap (~50ms) and cached.
     import("./stores/clis").then((m) => m.ensureClisDetected().catch(console.error));

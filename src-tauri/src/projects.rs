@@ -45,9 +45,7 @@ pub fn project_dir(home: &Path, slug: &str) -> PathBuf {
 }
 
 /// Where a project's memory cards live on disk. Always under the project's
-/// slug dir, regardless of folder count — single-folder projects use this dir
-/// lazily (created when the first card is saved) without affecting their
-/// agent cwd (which stays at `folders[0]`).
+/// slug dir, regardless of folder count.
 #[allow(dead_code)] // wired up in Step 4 (memory.rs)
 pub fn memories_dir(home: &Path, slug: &str) -> PathBuf {
     project_dir(home, slug).join("memories")
@@ -132,20 +130,16 @@ pub const DEFAULT_AGENT_ARGS: &[&str] = &[
 pub const DEFAULT_SHELL_PROGRAM: &str = "/bin/zsh";
 pub const DEFAULT_SHELL_ARGS: &[&str] = &["-i", "-l"];
 
-/// Computes the cwd for a project. Single-folder projects use the folder
-/// directly (no synthetic dir, no generated CLAUDE.md — Claude reads the
-/// repo's own one). Multi-folder projects use a materialized slug dir.
-pub fn compute_project_cwd(home: &Path, slug: &str, folders: &[String]) -> PathBuf {
-    if folders.len() <= 1 {
-        // We trust the caller to have ensured folders[0] exists.
-        PathBuf::from(folders.first().cloned().unwrap_or_default())
-    } else {
-        project_dir(home, slug)
-    }
+/// Cwd for a project's agent runner. Always the materialized slug dir under
+/// `~/.cosmos/projects/<slug>/` — Claude reads the generated CLAUDE.md there,
+/// which @-includes each folder's own CLAUDE.md and folds in pinned cards.
+pub fn compute_project_cwd(home: &Path, slug: &str, _folders: &[String]) -> PathBuf {
+    project_dir(home, slug)
 }
 
-/// Materializes the on-disk dir + `.claude/CLAUDE.md` only when there's more
-/// than one folder. Single-folder projects are pass-through. Idempotent.
+/// Materializes the on-disk dir + `.claude/CLAUDE.md`. Idempotent. Pinned
+/// memory cards are folded into the generated CLAUDE.md so Claude reads them
+/// on every turn.
 pub fn ensure_project_dir(
     home: &Path,
     slug: &str,
@@ -153,17 +147,10 @@ pub fn ensure_project_dir(
     folders: &[String],
     memory_text: &str,
 ) -> Result<PathBuf> {
-    if folders.len() <= 1 {
-        return Ok(PathBuf::from(folders.first().cloned().unwrap_or_default()));
-    }
     let dir = project_dir(home, slug);
     let claude_dir = dir.join(".claude");
     std::fs::create_dir_all(&claude_dir).context("creating project .claude dir")?;
     let claude_md = claude_dir.join("CLAUDE.md");
-    // Pinned memory cards auto-flow into the generated CLAUDE.md so Claude
-    // reads them on every turn. Single-folder projects skip this entire path,
-    // so pinning a card there does nothing automatically — Bruno needs to
-    // @-mention the file path in chat (documented in MemoryView's empty state).
     let pinned = memory::list_cards(home, slug)
         .unwrap_or_default()
         .into_iter()
@@ -177,9 +164,9 @@ pub fn ensure_project_dir(
     Ok(dir)
 }
 
-/// Re-render the generated CLAUDE.md for a project. No-op for single-folder
-/// projects (they don't have a synthetic dir). Called after memory mutations
-/// so pinned-card edits flow through without waiting for a project_update.
+/// Re-render the generated CLAUDE.md for a project. Called after memory
+/// mutations so pinned-card edits flow through without waiting for a
+/// project_update.
 pub fn refresh_claude_md(
     home: &Path,
     slug: &str,
@@ -187,9 +174,6 @@ pub fn refresh_claude_md(
     folders: &[String],
     memory_text: &str,
 ) -> Result<()> {
-    if folders.len() <= 1 {
-        return Ok(());
-    }
     ensure_project_dir(home, slug, name, folders, memory_text)?;
     Ok(())
 }
@@ -211,6 +195,56 @@ Always use absolute paths when reading or editing files inside them.\n\n",
     for f in folders {
         out.push_str(&format!("- {f}\n"));
     }
+
+    // Self-reference channel: tell the spawned agent that it can register
+    // siblings / new projects in the live Cosmos app by shelling out to the
+    // `cosmos` CLI (which the PTY spawner already put on $PATH and pointed
+    // at the running socket).
+    out.push_str("\n## Cosmos commands\n\n");
+    out.push_str(
+        "You are running inside Cosmos. To spawn another agent or create a \
+new project from this session, use the `cosmos` CLI (already on PATH):\n\n",
+    );
+    out.push_str("```sh\n");
+    out.push_str("# New sibling agent in this project (auto-starts):\n");
+    out.push_str("cosmos runner add --project . --name \"<name>\"\n\n");
+    out.push_str("# New project, optionally with an agent inside:\n");
+    out.push_str(
+        "cosmos project add --name \"<name>\" --folder /abs/path [--folder ...] \\\n  --with-agent \"<agent-name>\"\n\n",
+    );
+    out.push_str("# Read-only listing:\n");
+    out.push_str("cosmos project list\n");
+    out.push_str("cosmos runner list --project .\n");
+    out.push_str("```\n\n");
+    out.push_str(
+        "`--project .` resolves to this project via `$COSMOS_PROJECT_SLUG`. \
+The new agent appears in the sidebar but does **not** steal focus.\n",
+    );
+
+    // For each folder that already has its own CLAUDE.md, @-include it so the
+    // repo's existing context isn't silently dropped just because the agent's
+    // cwd is the synthetic dir. Checks both `.claude/CLAUDE.md` and the
+    // top-level `CLAUDE.md` (same precedence as fs_ops::read_claude_md).
+    let inherited: Vec<String> = folders
+        .iter()
+        .filter_map(|f| {
+            let root = Path::new(f);
+            for candidate in [".claude/CLAUDE.md", "CLAUDE.md"] {
+                let p = root.join(candidate);
+                if std::fs::metadata(&p).is_ok() {
+                    return Some(p.to_string_lossy().into_owned());
+                }
+            }
+            None
+        })
+        .collect();
+    if !inherited.is_empty() {
+        out.push_str("\n## Inherited memory\n\n");
+        for p in &inherited {
+            out.push_str(&format!("@{p}\n"));
+        }
+    }
+
     out.push_str("\n## Memory\n\n");
     if memory_text.trim().is_empty() {
         out.push_str("_(none yet)_\n");
@@ -329,12 +363,111 @@ pub fn list(store: &Store) -> Result<Vec<ProjectRecord>> {
         .collect()
 }
 
+/// Boot-time migration that brings every project into the unified shape:
+/// `cwd = ~/.cosmos/projects/<slug>/` and a materialized `.claude/CLAUDE.md`
+/// in that dir. Idempotent — re-running is cheap. Single-folder projects
+/// created before this change had `cwd = folders[0]`; we rewrite the row.
+pub fn migrate_to_synthetic_cwd(store: &Store, home: &Path) -> Result<()> {
+    for rec in list(store)? {
+        let expected_cwd = project_dir(home, &rec.slug)
+            .to_string_lossy()
+            .into_owned();
+        if rec.cwd != expected_cwd {
+            let mut updated = rec.clone();
+            updated.cwd = expected_cwd;
+            let row = record_to_row(&updated)?;
+            store.projects_upsert(&row)?;
+        }
+        ensure_project_dir(home, &rec.slug, &rec.name, &rec.folders, &rec.memory)?;
+    }
+    Ok(())
+}
+
 pub fn runners_list(store: &Store) -> Result<Vec<RunnerRecord>> {
     store
         .runners_list()?
         .into_iter()
         .map(runner_row_to_record)
         .collect()
+}
+
+/// Orchestrates a project creation end-to-end: validates input, generates the
+/// slug, writes the row, materializes the on-disk dir. Returns the new record.
+/// Both the Tauri command and the IPC server call this so the two surfaces
+/// can't drift.
+pub fn create_project(
+    home: &Path,
+    store: &Store,
+    name: String,
+    folders: Vec<String>,
+    memory: String,
+    new_id: String,
+    created_at: i64,
+) -> Result<ProjectRecord> {
+    let folders = dedupe_folders(folders);
+    if folders.is_empty() {
+        anyhow::bail!("at least one folder is required");
+    }
+    let trimmed = name.trim().to_string();
+    if trimmed.is_empty() {
+        anyhow::bail!("name is required");
+    }
+    if name_exists(store, &trimmed, None)? {
+        anyhow::bail!("a project named \"{trimmed}\" already exists");
+    }
+    let slug = dedupe_slug(store, &slugify(&trimmed))?;
+    let cwd = compute_project_cwd(home, &slug, &folders)
+        .to_string_lossy()
+        .into_owned();
+    let rec = ProjectRecord {
+        id: new_id,
+        name: trimmed,
+        slug,
+        folders,
+        memory,
+        cwd,
+        created_at,
+    };
+    let row = record_to_row(&rec)?;
+    store.projects_upsert(&row)?;
+    ensure_project_dir(home, &rec.slug, &rec.name, &rec.folders, &rec.memory)?;
+    Ok(rec)
+}
+
+/// Builds an in-memory runner record with the canonical defaults for `kind`,
+/// without persisting or spawning. Caller is responsible for upsert + PTY
+/// spawn. Pulled out so the IPC server and tauri commands share defaulting.
+pub fn build_runner_record(
+    new_id: String,
+    project_id: String,
+    kind: String,
+    name: String,
+    program: Option<String>,
+    args: Option<Vec<String>>,
+    env: Option<std::collections::HashMap<String, String>>,
+    created_at: i64,
+) -> RunnerRecord {
+    let kind_clean = if kind == "shell" { "shell" } else { "agent" }.to_string();
+    let (default_program, default_args): (&str, &[&str]) = if kind_clean == "shell" {
+        (DEFAULT_SHELL_PROGRAM, DEFAULT_SHELL_ARGS)
+    } else {
+        (DEFAULT_AGENT_PROGRAM, DEFAULT_AGENT_ARGS)
+    };
+    let program = program.unwrap_or_else(|| default_program.to_string());
+    let args = args.unwrap_or_else(|| default_args.iter().map(|s| s.to_string()).collect());
+    let with_status_fsm = kind_clean == "agent";
+    RunnerRecord {
+        id: new_id,
+        project_id,
+        kind: kind_clean,
+        name,
+        program,
+        args,
+        env: env.unwrap_or_default(),
+        with_status_fsm,
+        created_at,
+        last_active: created_at,
+    }
 }
 
 pub fn dedupe_folders(folders: Vec<String>) -> Vec<String> {

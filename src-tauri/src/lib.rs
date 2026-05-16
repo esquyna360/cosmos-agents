@@ -1,5 +1,7 @@
 mod clis;
 mod fs_ops;
+pub mod ipc;
+mod ipc_server;
 mod memory;
 mod projects;
 mod pty_supervisor;
@@ -31,6 +33,7 @@ fn now_unix() -> i64 {
 fn pty_spawn(
     app: AppHandle,
     sup: State<'_, PtySupervisor>,
+    store: State<'_, Store>,
     id: String,
     cwd: String,
     program: String,
@@ -47,7 +50,19 @@ fn pty_spawn(
         .as_deref()
         .map(RunnerKind::from_str)
         .unwrap_or(RunnerKind::Agent);
-    sup.spawn(app, id, project_id, kind, cwd, program, args, cols, rows)
+    // Resolve slug for env injection so `cosmos --project .` works. Best-effort:
+    // a missing project just yields an empty slug, same as legacy call sites.
+    let project_slug = if project_id.is_empty() {
+        String::new()
+    } else {
+        store
+            .projects_get(&project_id)
+            .ok()
+            .flatten()
+            .map(|r| r.slug)
+            .unwrap_or_default()
+    };
+    sup.spawn_with_slug(app, id, project_id, project_slug, kind, cwd, program, args, cols, rows)
         .map_err(|e| e.to_string())
 }
 
@@ -243,37 +258,8 @@ fn projects_create(
     memory: String,
 ) -> Result<ProjectRecord, String> {
     let home = home_dir(&app)?;
-    let folders = projects::dedupe_folders(folders);
-    if folders.is_empty() {
-        return Err("at least one folder is required".into());
-    }
-    let trimmed_name = name.trim().to_string();
-    if trimmed_name.is_empty() {
-        return Err("name is required".into());
-    }
-    if projects::name_exists(&store, &trimmed_name, None).map_err(|e| e.to_string())? {
-        return Err(format!("a project named \"{trimmed_name}\" already exists"));
-    }
-    let id = uuid_v4();
-    let slug = projects::dedupe_slug(&store, &projects::slugify(&trimmed_name))
-        .map_err(|e| e.to_string())?;
-    let cwd = projects::compute_project_cwd(&home, &slug, &folders)
-        .to_string_lossy()
-        .into_owned();
-    let rec = ProjectRecord {
-        id: id.clone(),
-        name: trimmed_name,
-        slug: slug.clone(),
-        folders: folders.clone(),
-        memory,
-        cwd,
-        created_at: now_unix(),
-    };
-    let row = projects::record_to_row(&rec).map_err(|e| e.to_string())?;
-    store.projects_upsert(&row).map_err(|e| e.to_string())?;
-    projects::ensure_project_dir(&home, &rec.slug, &rec.name, &rec.folders, &rec.memory)
-        .map_err(|e| e.to_string())?;
-    Ok(rec)
+    projects::create_project(&home, &store, name, folders, memory, uuid_v4(), now_unix())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -353,28 +339,16 @@ fn runners_create(
     args: Option<Vec<String>>,
     env: Option<std::collections::HashMap<String, String>>,
 ) -> Result<RunnerRecord, String> {
-    let kind_clean = if kind == "shell" { "shell" } else { "agent" }.to_string();
-    let (default_program, default_args): (&str, &[&str]) = if kind_clean == "shell" {
-        (projects::DEFAULT_SHELL_PROGRAM, projects::DEFAULT_SHELL_ARGS)
-    } else {
-        (projects::DEFAULT_AGENT_PROGRAM, projects::DEFAULT_AGENT_ARGS)
-    };
-    let program = program.unwrap_or_else(|| default_program.to_string());
-    let args = args.unwrap_or_else(|| default_args.iter().map(|s| s.to_string()).collect());
-    let with_status_fsm = kind_clean == "agent";
-    let now = now_unix();
-    let rec = RunnerRecord {
-        id: uuid_v4(),
+    let rec = projects::build_runner_record(
+        uuid_v4(),
         project_id,
-        kind: kind_clean,
+        kind,
         name,
         program,
         args,
-        env: env.unwrap_or_default(),
-        with_status_fsm,
-        created_at: now,
-        last_active: now,
-    };
+        env,
+        now_unix(),
+    );
     let row = projects::runner_record_to_row(&rec).map_err(|e| e.to_string())?;
     store.runners_upsert(&row).map_err(|e| e.to_string())?;
     Ok(rec)
@@ -485,6 +459,12 @@ fn memories_delete(
     Ok(())
 }
 
+/// Re-export for `ipc_server` which lives in this crate but outside the
+/// tauri-command boundary where `uuid_v4` is otherwise private.
+pub(crate) fn uuid_v4_for_ipc() -> String {
+    uuid_v4()
+}
+
 /// Minimal UUID-v4 generator using OS randomness. Avoids adding the `uuid`
 /// crate just for one call site.
 fn uuid_v4() -> String {
@@ -530,6 +510,7 @@ pub fn run() {
                 .home_dir()
                 .map_err(|e| Box::<dyn std::error::Error>::from(e.to_string()))?;
             store.migrate(&home)?;
+            projects::migrate_to_synthetic_cwd(&store, &home)?;
             app.manage(store);
 
             #[cfg(target_os = "macos")]
@@ -543,6 +524,18 @@ pub fn run() {
                         None,
                     );
                 }
+            }
+
+            // IPC server for the `cosmos` CLI. Logged but non-fatal — if a
+            // stale peer (or another running Cosmos) holds the socket, the
+            // app still works, agents just can't self-register until the
+            // collision is resolved.
+            let socket_path = ipc::default_socket_path(&home);
+            if let Err(e) = ipc_server::start(app.handle().clone(), socket_path.clone()) {
+                eprintln!(
+                    "[cosmos] IPC server failed to start ({e}). \
+                     `cosmos` CLI from spawned agents won't work this session."
+                );
             }
 
             Ok(())
