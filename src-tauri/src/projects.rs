@@ -116,19 +116,40 @@ pub fn name_exists(store: &Store, name: &str, exclude_id: Option<&str>) -> Resul
     Ok(false)
 }
 
-/// Canonical defaults for an agent runner. Kept here (not in lib.rs) so the
-/// frontend can read them via a tauri command in later steps without locking
-/// into a preset model.
+// Canonical defaults for an agent runner. Kept here (not in lib.rs) so the
+// frontend can read them via a tauri command in later steps without locking
+// into a preset model. Per-OS so the same defaults boot a usable agent /
+// shell on macOS, Linux, and Windows out of the box.
+#[cfg(unix)]
 pub const DEFAULT_AGENT_PROGRAM: &str = "/bin/zsh";
+#[cfg(unix)]
 pub const DEFAULT_AGENT_ARGS: &[&str] = &[
     "-i",
     "-l",
     "-c",
     "exec env CLAUDE_CODE_NO_FLICKER=1 claude --dangerously-skip-permissions",
 ];
-
+#[cfg(unix)]
 pub const DEFAULT_SHELL_PROGRAM: &str = "/bin/zsh";
+#[cfg(unix)]
 pub const DEFAULT_SHELL_ARGS: &[&str] = &["-i", "-l"];
+
+// Windows: powershell.exe (Windows PowerShell 5.1) is guaranteed to exist
+// on every Win10/11. Users can opt into pwsh (PS 7+) by editing the runner.
+// Args mirror the Unix shape: a one-liner that sets env + execs claude.
+#[cfg(windows)]
+pub const DEFAULT_AGENT_PROGRAM: &str = "powershell.exe";
+#[cfg(windows)]
+pub const DEFAULT_AGENT_ARGS: &[&str] = &[
+    "-NoLogo",
+    "-NoProfile",
+    "-Command",
+    "$env:CLAUDE_CODE_NO_FLICKER='1'; claude --dangerously-skip-permissions",
+];
+#[cfg(windows)]
+pub const DEFAULT_SHELL_PROGRAM: &str = "powershell.exe";
+#[cfg(windows)]
+pub const DEFAULT_SHELL_ARGS: &[&str] = &["-NoLogo"];
 
 /// Cwd for a project's agent runner. Always the materialized slug dir under
 /// `~/.cosmos/projects/<slug>/` — Claude reads the generated CLAUDE.md there,

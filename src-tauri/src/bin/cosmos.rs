@@ -1,15 +1,20 @@
 //! `cosmos` — tiny CLI client that talks to the running Cosmos app over a
-//! Unix socket. Designed to be invoked from inside an agent's PTY (the app
-//! injects `COSMOS_SOCKET` + `COSMOS_PROJECT_SLUG` into the env), so spawned
-//! agents can register new projects/runners by running a shell command.
+//! local socket (Unix socket on macOS/Linux, named pipe on Windows). Designed
+//! to be invoked from inside an agent's PTY (the app injects `COSMOS_SOCKET` +
+//! `COSMOS_PROJECT_SLUG` into the env), so spawned agents can register new
+//! projects/runners by running a shell command.
 
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use agent_dashboard_lib::ipc::{default_socket_path, Request, Response};
 use clap::{Parser, Subcommand};
+use interprocess::local_socket::{prelude::*, Stream};
+#[cfg(unix)]
+use interprocess::local_socket::GenericFilePath;
+#[cfg(windows)]
+use interprocess::local_socket::GenericNamespaced;
 
 #[derive(Parser)]
 #[command(name = "cosmos", about = "Cosmos CLI — talks to the running app", version)]
@@ -156,29 +161,56 @@ fn resolve_project_handle(handle: &str) -> Result<String, String> {
     }
 }
 
+/// HOME on Unix, USERPROFILE on Windows. Falls back to the current dir so
+/// `default_socket_path` returns something usable rather than panicking.
+fn home_dir() -> PathBuf {
+    #[cfg(windows)]
+    let var = "USERPROFILE";
+    #[cfg(not(windows))]
+    let var = "HOME";
+    std::env::var(var).map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("."))
+}
+
 fn socket_path() -> PathBuf {
     if let Ok(p) = std::env::var("COSMOS_SOCKET") {
         return PathBuf::from(p);
     }
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    default_socket_path(&PathBuf::from(home))
+    default_socket_path(&home_dir())
+}
+
+fn ipc_name(socket_path: &Path) -> Result<interprocess::local_socket::Name<'_>, String> {
+    #[cfg(windows)]
+    {
+        let stem = socket_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| format!("invalid socket path {}", socket_path.display()))?;
+        stem.to_ns_name::<GenericNamespaced>()
+            .map_err(|e| format!("building named-pipe name: {e}"))
+    }
+    #[cfg(unix)]
+    {
+        socket_path
+            .to_fs_name::<GenericFilePath>()
+            .map_err(|e| format!("building unix-socket name: {e}"))
+    }
 }
 
 fn send(req: Request) -> Result<Response, String> {
     let path = socket_path();
-    let mut stream = UnixStream::connect(&path).map_err(|e| {
+    let name = ipc_name(&path)?;
+    let stream = Stream::connect(name).map_err(|e| {
         format!(
             "could not connect to Cosmos app at {} ({e}). Is Cosmos running?",
             path.display()
         )
     })?;
+    let (recv, mut send) = stream.split();
     let body = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-    stream
-        .write_all(body.as_bytes())
-        .map_err(|e| e.to_string())?;
-    stream.write_all(b"\n").map_err(|e| e.to_string())?;
-    stream.flush().map_err(|e| e.to_string())?;
-    let mut reader = BufReader::new(stream);
+    send.write_all(body.as_bytes()).map_err(|e| e.to_string())?;
+    send.write_all(b"\n").map_err(|e| e.to_string())?;
+    send.flush().map_err(|e| e.to_string())?;
+    let mut reader = BufReader::new(recv);
     let mut line = String::new();
     reader
         .read_line(&mut line)

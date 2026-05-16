@@ -137,28 +137,23 @@ impl PtySupervisor {
         if !project_slug.is_empty() {
             cmd.env("COSMOS_PROJECT_SLUG", &project_slug);
         }
-        if let Ok(home) = std::env::var("HOME") {
-            cmd.env(
-                "COSMOS_SOCKET",
-                std::path::Path::new(&home)
-                    .join(".cosmos")
-                    .join("cosmos.sock")
-                    .to_string_lossy()
-                    .as_ref(),
-            );
+        if let Some(home) = home_dir() {
+            let socket_path = crate::ipc::default_socket_path(&home);
+            cmd.env("COSMOS_SOCKET", socket_path.as_os_str());
         }
         // Prepend the cosmos CLI's own dir to PATH so `cosmos` resolves
         // without the user having to symlink it anywhere. The CLI binary is
         // built into the same dir as the app binary (target/{debug,release}/
-        // in dev, Contents/MacOS/ in a packaged .app).
+        // in dev, Contents/MacOS/ in a packaged .app, %LocalAppData%\… on
+        // Windows). `join_paths` uses the platform's separator (`:` on Unix,
+        // `;` on Windows).
         if let Some(cli_dir) = cosmos_cli_dir() {
-            let prev = std::env::var("PATH").unwrap_or_default();
-            let new_path = if prev.is_empty() {
-                cli_dir.to_string_lossy().into_owned()
-            } else {
-                format!("{}:{}", cli_dir.display(), prev)
-            };
-            cmd.env("PATH", new_path);
+            let prev = std::env::var_os("PATH").unwrap_or_default();
+            let mut entries: Vec<std::path::PathBuf> = vec![cli_dir];
+            entries.extend(std::env::split_paths(&prev));
+            if let Ok(joined) = std::env::join_paths(entries) {
+                cmd.env("PATH", joined);
+            }
         }
 
         let child = pair.slave.spawn_command(cmd)?;
@@ -366,6 +361,17 @@ fn cosmos_cli_dir() -> Option<std::path::PathBuf> {
         .ok()?
         .parent()
         .map(|p| p.to_path_buf())
+}
+
+/// Cross-platform home directory lookup. HOME on Unix, USERPROFILE on
+/// Windows. Returns None when the env var is missing — callers treat that
+/// as "no socket env var injected" rather than panicking.
+fn home_dir() -> Option<std::path::PathBuf> {
+    #[cfg(windows)]
+    let var = "USERPROFILE";
+    #[cfg(not(windows))]
+    let var = "HOME";
+    std::env::var_os(var).map(std::path::PathBuf::from)
 }
 
 fn emit_status(inner: &RunnerInner, status: Status) {

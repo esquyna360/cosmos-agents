@@ -1,23 +1,26 @@
-//! Unix-socket RPC server that lets the `cosmos` CLI (running inside a
-//! spawned agent's PTY) register new projects/runners in the live app.
+//! Cross-platform local-socket RPC server that lets the `cosmos` CLI (running
+//! inside a spawned agent's PTY) register new projects/runners in the live
+//! app. Uses `interprocess::local_socket` so the same code path covers Unix
+//! sockets on macOS/Linux and named pipes on Windows.
 //!
 //! Lifecycle:
-//! - `start` is called once at app setup. It detects a stale socket from a
-//!   previous run (no live peer answers a probe) and unlinks it, then spawns
-//!   an accept thread that dispatches each connection on its own thread.
+//! - `start` is called once at app setup. On Unix it detects a stale socket
+//!   from a previous run (no live peer answers a probe) and unlinks the file
+//!   before binding. On Windows named pipes don't persist after the owning
+//!   process exits, so the stale-cleanup step is a no-op.
 //! - Each connection: read one line of JSON → `Request`, dispatch, write one
 //!   line of JSON → `Response`, close. Stateless on the wire.
-//!
-//! Why threads, not async: the rest of the app is sync (rusqlite is sync,
-//! PtySupervisor uses std threads); spinning up a tokio runtime just for this
-//! socket would be heavier than the work it does.
 
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::thread;
 
 use anyhow::{anyhow, Context, Result};
+use interprocess::local_socket::{prelude::*, ListenerOptions, Stream};
+#[cfg(unix)]
+use interprocess::local_socket::GenericFilePath;
+#[cfg(windows)]
+use interprocess::local_socket::GenericNamespaced;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -31,34 +34,65 @@ use crate::store::Store;
 const SPAWN_COLS: u16 = 120;
 const SPAWN_ROWS: u16 = 32;
 
+/// Build a platform-appropriate local-socket name from `socket_path`. On Unix
+/// we use the path verbatim as a filesystem socket; on Windows we take the
+/// file name and put it in the namespaced pipe namespace (`\\.\pipe\<name>`).
+fn ipc_name(socket_path: &Path) -> Result<interprocess::local_socket::Name<'_>> {
+    #[cfg(windows)]
+    {
+        let stem = socket_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| anyhow!("invalid socket path {}", socket_path.display()))?;
+        stem.to_ns_name::<GenericNamespaced>()
+            .context("building named-pipe name")
+    }
+    #[cfg(unix)]
+    {
+        socket_path
+            .to_fs_name::<GenericFilePath>()
+            .context("building unix-socket name")
+    }
+}
+
 /// Binds to `socket_path` and spawns an accept thread. Fails fast if another
 /// live Cosmos is already serving the socket (so we don't end up with two
 /// servers racing on the same SQLite).
 pub fn start(app: AppHandle, socket_path: PathBuf) -> Result<()> {
-    if let Some(parent) = socket_path.parent() {
-        std::fs::create_dir_all(parent).context("creating cosmos.sock parent dir")?;
-    }
-    if socket_path.exists() {
-        // If a peer answers the probe, another instance owns the socket and
-        // we must not bind. If the connect fails (ECONNREFUSED on a stale
-        // node), unlink and continue.
-        match UnixStream::connect(&socket_path) {
-            Ok(_) => {
-                return Err(anyhow!(
-                    "another Cosmos app is already listening on {}",
-                    socket_path.display()
-                ));
-            }
-            Err(_) => {
-                let _ = std::fs::remove_file(&socket_path);
+    #[cfg(unix)]
+    {
+        if let Some(parent) = socket_path.parent() {
+            std::fs::create_dir_all(parent).context("creating cosmos.sock parent dir")?;
+        }
+        if socket_path.exists() {
+            // If a peer answers the probe, another instance owns the socket and
+            // we must not bind. If the connect fails (ECONNREFUSED on a stale
+            // node), unlink and continue.
+            let probe_name = ipc_name(&socket_path)?;
+            match Stream::connect(probe_name) {
+                Ok(_) => {
+                    return Err(anyhow!(
+                        "another Cosmos app is already listening on {}",
+                        socket_path.display()
+                    ));
+                }
+                Err(_) => {
+                    let _ = std::fs::remove_file(&socket_path);
+                }
             }
         }
     }
-    let listener = UnixListener::bind(&socket_path).with_context(|| {
-        format!("binding cosmos IPC socket at {}", socket_path.display())
-    })?;
+
+    let name = ipc_name(&socket_path)?;
+    let listener = ListenerOptions::new()
+        .name(name)
+        .create_sync()
+        .with_context(|| format!("binding cosmos IPC socket at {}", socket_path.display()))?;
+
     // Owner-only — defense in depth. The default umask is usually fine but
     // we set it explicitly so multi-user machines don't leak the channel.
+    // On Windows, named pipes default to the creator's user via DACL, which
+    // is already the desired behavior.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -89,8 +123,9 @@ pub fn start(app: AppHandle, socket_path: PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn handle_connection(app: AppHandle, stream: UnixStream) -> Result<()> {
-    let mut reader = BufReader::new(stream.try_clone()?);
+fn handle_connection(app: AppHandle, stream: Stream) -> Result<()> {
+    let (recv, mut send) = stream.split();
+    let mut reader = BufReader::new(recv);
     let mut line = String::new();
     reader.read_line(&mut line)?;
     let trimmed = line.trim();
@@ -101,11 +136,10 @@ fn handle_connection(app: AppHandle, stream: UnixStream) -> Result<()> {
         Ok(req) => dispatch(&app, req),
         Err(e) => Response::err(format!("invalid request: {e}")),
     };
-    let mut writer = stream;
     let body = serde_json::to_string(&resp)?;
-    writer.write_all(body.as_bytes())?;
-    writer.write_all(b"\n")?;
-    writer.flush()?;
+    send.write_all(body.as_bytes())?;
+    send.write_all(b"\n")?;
+    send.flush()?;
     Ok(())
 }
 
