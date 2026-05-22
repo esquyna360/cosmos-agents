@@ -153,16 +153,14 @@ run "pnpm tauri build"
 # --- locate build artifacts --------------------------------------------------
 BUNDLE_DIR="$ROOT/src-tauri/target/release/bundle"
 APP_SRC="$BUNDLE_DIR/macos/${APP_NAME}.app"
-DMG_SRC="$(find "$BUNDLE_DIR/dmg" -name "${APP_NAME}_${NEW}_*.dmg" -print -quit 2>/dev/null || true)"
 UPDATER_TARBALL="$(find "$BUNDLE_DIR/macos" -name "${APP_NAME}.app.tar.gz" -print -quit 2>/dev/null || true)"
 UPDATER_SIG="$(find "$BUNDLE_DIR/macos" -name "${APP_NAME}.app.tar.gz.sig" -print -quit 2>/dev/null || true)"
 
 if [[ $DRY_RUN -eq 0 ]]; then
   [[ -d "$APP_SRC" ]] || die "Build did not produce $APP_SRC"
-  [[ -n "$DMG_SRC" && -f "$DMG_SRC" ]] || die "Build did not produce a .dmg in $BUNDLE_DIR/dmg"
   [[ -n "$UPDATER_TARBALL" && -f "$UPDATER_TARBALL" ]] || die "Missing updater tarball ${APP_NAME}.app.tar.gz"
   [[ -n "$UPDATER_SIG" && -f "$UPDATER_SIG" ]] || die "Missing updater signature ${APP_NAME}.app.tar.gz.sig"
-  log "Built: $DMG_SRC"
+  log "Built tarball: $UPDATER_TARBALL"
 fi
 
 # --- local install -----------------------------------------------------------
@@ -237,17 +235,23 @@ if [[ $DO_RELEASE -eq 1 ]]; then
 JSON
   fi
 
+  # Also zip up the raw .app so people without the updater can drag-install
+  APP_ZIP="${BUNDLE_DIR}/macos/${APP_NAME}_${NEW}_aarch64.app.zip"
+  if [[ $DRY_RUN -eq 0 ]]; then
+    (cd "$(dirname "$APP_SRC")" && /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$(basename "$APP_SRC")" "$APP_ZIP")
+  fi
+
   log "Creating GitHub release $TAG"
   if [[ $DRY_RUN -eq 1 ]]; then
-    echo "  + gh release create $TAG --title $TAG --notes ... $DMG_SRC $UPDATER_TARBALL_VER $UPDATER_SIG_VER $LATEST_JSON"
+    echo "  + gh release create $TAG --title $TAG --notes ... $UPDATER_TARBALL_VER $UPDATER_SIG_VER $LATEST_JSON $APP_ZIP"
   else
     gh release create "$TAG" \
       --title "$TAG" \
       --notes "$NOTES" \
-      "$DMG_SRC#${APP_NAME} ${NEW} (arm64 dmg)" \
       "$UPDATER_TARBALL_VER#${APP_NAME} ${NEW} (updater tarball)" \
       "$UPDATER_SIG_VER#${APP_NAME} ${NEW} (signature)" \
-      "$LATEST_JSON#updater manifest"
+      "$LATEST_JSON#updater manifest" \
+      "$APP_ZIP#${APP_NAME} ${NEW} (arm64 app.zip)"
   fi
   log "Done — https://github.com/esquyna360/cosmos-agents/releases/tag/$TAG"
 fi
