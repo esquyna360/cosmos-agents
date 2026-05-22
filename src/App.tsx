@@ -7,6 +7,7 @@ import {
   Show,
 } from "solid-js";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   isPermissionGranted,
   requestPermission,
@@ -23,6 +24,7 @@ import DiffView from "./components/DiffView";
 import WorkflowView from "./components/WorkflowView";
 import AgentCreatorModal from "./components/AgentCreatorModal";
 import ProjectTitleBar from "./components/ProjectTitleBar";
+import UpdateBanner from "./components/UpdateBanner";
 import RunnerTabs from "./components/RunnerTabs";
 import MemoryView from "./components/MemoryView";
 import { creator, openCreator, closeCreator } from "./stores/creator";
@@ -218,7 +220,16 @@ export default function App() {
       <div
         class="h-7 shrink-0 select-none"
         data-tauri-drag-region
-        title="Cosmos"
+        title="Cosmos — arraste daqui"
+        onMouseDown={(e) => {
+          if (e.button !== 0) return;
+          const target = e.target as HTMLElement;
+          if (target.closest("button, input, textarea, a, [data-no-drag]")) return;
+          getCurrentWindow().startDragging().catch(() => {});
+        }}
+        onDblClick={() => {
+          getCurrentWindow().toggleMaximize().catch(() => {});
+        }}
       />
       <div class="relative flex min-h-0 min-w-0 flex-1">
         <Sidebar />
@@ -327,6 +338,7 @@ export default function App() {
           </Show>
         </main>
       </div>
+      <UpdateBanner />
     </div>
   );
 }
