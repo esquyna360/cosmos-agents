@@ -145,9 +145,17 @@ else
     sleep 2
   done
   [[ -n "$RUN_ID" ]] || die "Could not find a workflow run for tag $TAG — check https://github.com/${REPO_SLUG}/actions"
-  log "Watching run $RUN_ID"
-  gh run watch "$RUN_ID" --repo "$REPO_SLUG" --exit-status \
-    || die "Release workflow failed. See https://github.com/${REPO_SLUG}/actions/runs/$RUN_ID"
+  log "Watching run $RUN_ID (poll every 30s — survives network blips)"
+  # Poll until completed; tolerate transient gh/network errors by retrying.
+  STATUS=""
+  while [[ "$STATUS" != "completed" ]]; do
+    sleep 30
+    STATUS="$(gh run view "$RUN_ID" --repo "$REPO_SLUG" --json status -q .status 2>/dev/null || true)"
+  done
+  CONCLUSION="$(gh run view "$RUN_ID" --repo "$REPO_SLUG" --json conclusion -q .conclusion 2>/dev/null || echo "")"
+  if [[ "$CONCLUSION" != "success" ]]; then
+    die "Workflow finished with conclusion=$CONCLUSION. See https://github.com/${REPO_SLUG}/actions/runs/$RUN_ID"
+  fi
 fi
 
 # --- install macOS build locally --------------------------------------------
