@@ -452,6 +452,17 @@ pub fn create_project(
     let row = record_to_row(&rec)?;
     store.projects_upsert(&row)?;
     ensure_project_dir(home, &rec.slug, &rec.name, &rec.folders, &rec.memory)?;
+
+    // Pre-approve Claude Code's trust dialog for every path the spawned agent
+    // might land on: each working folder + the synthetic project cwd. Without
+    // this, a remote flow (Telegram, etc.) hits an interactive modal that the
+    // user can't click. Best-effort — failure is logged, not fatal.
+    let mut trust_paths: Vec<String> = rec.folders.clone();
+    trust_paths.push(rec.cwd.clone());
+    if let Err(e) = mark_paths_trusted_in_claude_json(home, &trust_paths) {
+        eprintln!("cosmos: failed to pre-approve Claude trust dialog: {e}");
+    }
+
     Ok(rec)
 }
 
@@ -489,6 +500,56 @@ pub fn build_runner_record(
         created_at,
         last_active: created_at,
     }
+}
+
+/// Pre-approve the "Do you trust the files in this folder?" dialog for Claude
+/// Code by writing `hasTrustDialogAccepted=true` into `~/.claude.json` for each
+/// path. Best-effort: if `~/.claude.json` is missing or unparseable we just
+/// return — the user can still accept manually. The point is to unblock remote
+/// flows (e.g. Telegram) where the modal sits on a freshly-spawned agent that
+/// the user can't see or click.
+pub fn mark_paths_trusted_in_claude_json(home: &Path, paths: &[String]) -> Result<()> {
+    let cfg = home.join(".claude.json");
+    if !cfg.exists() {
+        return Ok(());
+    }
+    let raw = std::fs::read_to_string(&cfg).context("reading ~/.claude.json")?;
+    let mut json: serde_json::Value =
+        serde_json::from_str(&raw).context("parsing ~/.claude.json")?;
+    let Some(projects) = json
+        .as_object_mut()
+        .and_then(|o| o.get_mut("projects"))
+        .and_then(|p| p.as_object_mut())
+    else {
+        return Ok(());
+    };
+    let mut changed = false;
+    for key in paths {
+        let entry = projects
+            .entry(key.clone())
+            .or_insert_with(|| serde_json::json!({}));
+        let Some(obj) = entry.as_object_mut() else {
+            continue;
+        };
+        let already = obj
+            .get("hasTrustDialogAccepted")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !already {
+            obj.insert(
+                "hasTrustDialogAccepted".into(),
+                serde_json::Value::Bool(true),
+            );
+            changed = true;
+        }
+    }
+    if changed {
+        let tmp = cfg.with_extension("json.cosmos-tmp");
+        let pretty = serde_json::to_string_pretty(&json).context("encoding ~/.claude.json")?;
+        std::fs::write(&tmp, pretty).context("writing tmp ~/.claude.json")?;
+        std::fs::rename(&tmp, &cfg).context("renaming tmp ~/.claude.json")?;
+    }
+    Ok(())
 }
 
 pub fn dedupe_folders(folders: Vec<String>) -> Vec<String> {
