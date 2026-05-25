@@ -76,6 +76,21 @@ export default function Terminal(props: Props) {
     const onChunk = (chunk: Uint8Array) =>
       term.write(decoder.decode(chunk, { stream: true }));
 
+    // Wire up onData BEFORE attaching. Attach replays the PTY's buffered
+    // output, which for a freshly-spawned agent includes Claude's startup
+    // cursor-position query (DSR `ESC[6n`). xterm auto-answers that query, but
+    // its answer only reaches Claude through this onData handler — if it isn't
+    // registered yet, the answer is dropped and Claude blocks forever waiting
+    // for it, drawing nothing but a cursor. This bites hardest on Windows
+    // ConPTY, where the query reliably lands in the initial buffer snapshot
+    // (replayed synchronously on attach) rather than arriving live afterward.
+    const dataDisp = term.onData((data) => {
+      ptyWrite(id, data).catch(console.error);
+    });
+    const resizeDisp = term.onResize(({ cols, rows }) => {
+      ptyResize(id, cols, rows).catch(console.error);
+    });
+
     try {
       await ptyAttach(id, onChunk);
       await ptyResize(id, term.cols, term.rows).catch(() => {});
@@ -102,13 +117,6 @@ export default function Terminal(props: Props) {
         console.error("revive failed", e);
       }
     }
-
-    const dataDisp = term.onData((data) => {
-      ptyWrite(id, data).catch(console.error);
-    });
-    const resizeDisp = term.onResize(({ cols, rows }) => {
-      ptyResize(id, cols, rows).catch(console.error);
-    });
 
     const ro = new ResizeObserver(() => fit.fit());
     ro.observe(host);
