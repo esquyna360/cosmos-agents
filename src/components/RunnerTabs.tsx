@@ -107,11 +107,15 @@ export default function RunnerTabs(props: Props) {
     closeShellDropdown();
     const runnerName = p().folders.length > 1 ? `${fs.basename}·${name}` : name;
     const invocation = scriptInvocation(fs.packageManager, name);
+    // Windows has no /bin/zsh — run the script under powershell instead.
+    const { program, args } = navigator.userAgent.includes("Windows")
+      ? { program: "powershell.exe", args: ["-NoLogo", "-NoProfile", "-Command", invocation] }
+      : { program: "/bin/zsh", args: ["-i", "-l", "-c", `exec ${invocation}`] };
     await createRunnerInProject(p().id, "shell", {
       name: runnerName,
       cwd: fs.folder,
-      program: "/bin/zsh",
-      args: ["-i", "-l", "-c", `exec ${invocation}`],
+      program,
+      args,
     }).catch(console.error);
     // Hint to UI that the shell is running `cmd` — purely informational for
     // a future tooltip. cmd unused at runtime.
