@@ -35,6 +35,14 @@ enum Cmd {
         #[command(subcommand)]
         cmd: RunnerCmd,
     },
+    /// Show the remote web UI: local URL, Cloudflare tunnel and the link that
+    /// carries the token. The tunnel URL rotates on every reconnect, so this
+    /// is the way to get the current one.
+    Web {
+        /// Print only the authenticated link (or the local one if no tunnel).
+        #[arg(long)]
+        link: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -75,6 +83,9 @@ enum RunnerCmd {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    if let Cmd::Web { link } = cli.cmd {
+        return web(link);
+    }
     let req = match build_request(cli) {
         Ok(r) => r,
         Err(e) => {
@@ -107,8 +118,40 @@ fn main() -> ExitCode {
     }
 }
 
+/// Reads what the app wrote to `~/.cosmos/web-url`. Deliberately file-based
+/// rather than an IPC round-trip so it still answers while the app is busy.
+fn web(link_only: bool) -> ExitCode {
+    let path = home_dir().join(".cosmos").join("web-url");
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        eprintln!("cosmos: web UI not running (no {})", path.display());
+        return ExitCode::from(1);
+    };
+    let value: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cosmos: unreadable {}: {e}", path.display());
+            return ExitCode::from(1);
+        }
+    };
+    if link_only {
+        let link = value
+            .get("link")
+            .and_then(|v| v.as_str())
+            .or_else(|| value.get("local").and_then(|v| v.as_str()))
+            .unwrap_or("");
+        println!("{link}");
+        return ExitCode::SUCCESS;
+    }
+    match serde_json::to_string_pretty(&value) {
+        Ok(s) => println!("{s}"),
+        Err(_) => println!("{value}"),
+    }
+    ExitCode::SUCCESS
+}
+
 fn build_request(cli: Cli) -> Result<Request, String> {
     Ok(match cli.cmd {
+        Cmd::Web { .. } => unreachable!("handled in main"),
         Cmd::Project { cmd } => match cmd {
             ProjectCmd::Add {
                 name,

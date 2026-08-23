@@ -237,6 +237,9 @@ export function migrateLegacyLocalStorage(): void {
 
 /* ------------------------------ loader ----------------------------------- */
 
+/// Kept in sync with `master::MASTER_NAME` on the Rust side.
+const MASTER_NAME = "geral";
+
 export async function loadProjects(): Promise<void> {
   const [projects, runners, live] = await Promise.all([
     projectsList(),
@@ -270,7 +273,10 @@ export async function loadProjects(): Promise<void> {
   setState("list", list);
 
   if (list.length > 0 && focusedProjectIdSignal() === null) {
-    setFocusedProjectIdSignal(list[0].id);
+    // The master agent owns the first screen: Cosmos opens on `geral`, not on
+    // whichever project happens to sort first.
+    const master = list.find((p) => p.name.toLowerCase() === MASTER_NAME);
+    setFocusedProjectIdSignal((master ?? list[0]).id);
   }
 
   // Enrich each project's cwd asynchronously (stacks + CLAUDE.md).

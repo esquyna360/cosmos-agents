@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use tokio::sync::broadcast;
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter};
@@ -13,6 +14,9 @@ use tauri::{AppHandle, Emitter};
 use crate::status_fsm::{Status, StatusFsm};
 
 const BUFFER_CAP: usize = 1_000_000;
+/// Slack for web viewers that fall behind. A lagging subscriber loses the
+/// dropped chunks, not the connection — it re-syncs on the next frame.
+const WEB_FANOUT_CAP: usize = 512;
 const TICK_INTERVAL: Duration = Duration::from_millis(400);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,6 +64,10 @@ struct RunnerInner {
     child: Mutex<Box<dyn portable_pty::Child + Send + Sync>>,
     fsm: Mutex<Option<StatusFsm>>,
     app: AppHandle,
+    /// Fan-out to remote (web) viewers. Independent of `channel`, which is
+    /// the single desktop attachment — a phone watching over the tunnel must
+    /// not steal output from the app window.
+    web_tx: broadcast::Sender<Vec<u8>>,
 }
 
 pub struct PtySupervisor {
@@ -178,6 +186,7 @@ impl PtySupervisor {
             child: Mutex::new(child),
             fsm: Mutex::new(fsm),
             app,
+            web_tx: broadcast::channel(WEB_FANOUT_CAP).0,
         });
 
         self.runners
@@ -210,6 +219,7 @@ impl PtySupervisor {
                             if let Some(ch) = ch {
                                 let _ = ch.send(InvokeResponseBody::Raw(chunk.to_vec()));
                             }
+                            let _ = inner_r.web_tx.send(chunk.to_vec());
                             let next = {
                                 let mut fsm = inner_r.fsm.lock().unwrap();
                                 fsm.as_mut().and_then(|f| f.on_chunk(chunk))
@@ -258,6 +268,25 @@ impl PtySupervisor {
         emit_status(&inner, initial);
 
         Ok(())
+    }
+
+    /// Remote viewer attachment: scrollback snapshot + a live feed that is
+    /// additive — any number of web clients can watch one PTY alongside the
+    /// desktop window.
+    pub fn web_subscribe(&self, id: &str) -> Option<(Vec<u8>, broadcast::Receiver<Vec<u8>>)> {
+        let runners = self.runners.lock().unwrap();
+        let inner = runners.get(id).cloned()?;
+        drop(runners);
+        let snapshot = inner.buffer.lock().unwrap().clone();
+        Some((snapshot, inner.web_tx.subscribe()))
+    }
+
+    pub fn size(&self, id: &str) -> Option<(u16, u16)> {
+        let runners = self.runners.lock().unwrap();
+        let inner = runners.get(id).cloned()?;
+        drop(runners);
+        let size = inner.master.lock().unwrap().get_size().ok()?;
+        Some((size.cols, size.rows))
     }
 
     pub fn attach(&self, id: &str, channel: Channel<InvokeResponseBody>) -> Result<()> {

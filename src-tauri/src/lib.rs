@@ -2,11 +2,15 @@ mod clis;
 mod fs_ops;
 pub mod ipc;
 mod ipc_server;
+mod master;
 mod memory;
 mod projects;
 mod pty_supervisor;
+pub mod remote;
 mod status_fsm;
 mod store;
+mod tunnel;
+mod web;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -462,6 +466,14 @@ fn memories_delete(
     Ok(())
 }
 
+/// Local URL, tunnel URL and token for the web control plane — what the
+/// title bar shows and what `cosmos web` prints.
+#[tauri::command]
+fn web_info(app: AppHandle) -> Result<serde_json::Value, String> {
+    let home = home_dir(&app)?;
+    Ok(remote::info(&home))
+}
+
 /// Re-export for `ipc_server` which lives in this crate but outside the
 /// tauri-command boundary where `uuid_v4` is otherwise private.
 pub(crate) fn uuid_v4_for_ipc() -> String {
@@ -531,6 +543,19 @@ pub fn run() {
                 }
             }
 
+            // The master agent comes up before anything else touches the UI:
+            // Cosmos should never open on an empty room.
+            if let Err(e) = master::ensure(app.handle()) {
+                eprintln!("[cosmos] master agent `geral` failed to start: {e}");
+            }
+
+            // Remote control plane: loopback HTTP + Cloudflare tunnel.
+            match remote::start(app.handle().clone(), &home) {
+                Ok(Some(port)) => eprintln!("[cosmos] web UI on http://127.0.0.1:{port}"),
+                Ok(None) => {}
+                Err(e) => eprintln!("[cosmos] web UI failed to start: {e}"),
+            }
+
             // IPC server for the `cosmos` CLI. Logged but non-fatal — if a
             // stale peer (or another running Cosmos) holds the socket, the
             // app still works, agents just can't self-register until the
@@ -579,7 +604,15 @@ pub fn run() {
             memories_list,
             memories_upsert,
             memories_delete,
+            web_info,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            // The tunnel is a child process; without this it outlives the
+            // window and keeps a public URL alive with nothing behind it.
+            if let tauri::RunEvent::Exit = event {
+                tunnel::shutdown();
+            }
+        });
 }

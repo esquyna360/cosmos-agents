@@ -1,5 +1,5 @@
-import { For, Show } from "solid-js";
-import { Settings2, X } from "lucide-solid";
+import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { Globe, Settings2, X } from "lucide-solid";
 
 import {
   closeProject,
@@ -13,6 +13,7 @@ import { sidebarWidthPx, setSidebarWidthPx } from "../stores/layout";
 import { colorForPath } from "../lib/colorHash";
 import StatusDot from "./StatusDot";
 import InlineEdit from "./InlineEdit";
+import { webInfo, type WebInfo } from "../lib/remote";
 import { updateProject } from "../stores/projects";
 
 function basename(p: string): string {
@@ -45,6 +46,7 @@ export default function Sidebar() {
           {(p) => <ProjectRow project={p} />}
         </For>
       </ul>
+      <RemoteLink />
       <div class="border-t border-white/5 px-3 py-2 text-[10px] leading-relaxed text-white/30">
         ⌘T new · ⌘⇧N agent · ⌘W close runner · ⌘⇧W close project<br />
         ⌘E view · ⌘I composer · ⌘D workflow<br />
@@ -52,6 +54,51 @@ export default function Sidebar() {
       </div>
       <ResizeHandle />
     </aside>
+  );
+}
+
+/// Footer affordance for the web control plane. A quick-tunnel URL rotates on
+/// every reconnect, so the value of showing it is that one click puts the
+/// *current* one on the clipboard.
+function RemoteLink() {
+  const [info, setInfo] = createSignal<WebInfo | null>(null);
+  const [copied, setCopied] = createSignal(false);
+
+  const refresh = () => webInfo().then(setInfo).catch(() => setInfo(null));
+  onMount(() => {
+    refresh();
+    const t = setInterval(refresh, 10_000);
+    onCleanup(() => clearInterval(t));
+  });
+
+  const link = () => info()?.link || info()?.local || null;
+  const online = () => Boolean(info()?.tunnel);
+
+  return (
+    <button
+      class="flex items-center gap-2 border-t border-white/5 px-3 py-2 text-left text-[11px] text-white/45 hover:bg-white/5 hover:text-white/80"
+      disabled={!link()}
+      title={link() ?? "web UI off"}
+      onClick={() => {
+        const url = link();
+        if (!url) return;
+        navigator.clipboard.writeText(url).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1600);
+        });
+      }}
+    >
+      <Globe size={12} class={online() ? "text-emerald-400/80" : "text-white/30"} />
+      <span class="min-w-0 flex-1 truncate">
+        {copied()
+          ? "link copiado"
+          : online()
+            ? "remoto ativo · copiar link"
+            : link()
+              ? "só local · copiar link"
+              : "web ui off"}
+      </span>
+    </button>
   );
 }
 

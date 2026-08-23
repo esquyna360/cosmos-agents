@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"
+    />
+    <meta name="theme-color" content="#0b0d10" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Cosmos</title>
+    <link rel="stylesheet" href="/assets/app.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <h1>Cosmos</h1>
+      <span class="tag" id="tunnel">…</span>
+      <button class="icon" id="refresh" aria-label="Atualizar">↻</button>
+    </header>
+    <main id="app"><div class="empty">carregando…</div></main>
+
+    <script type="module">
+      import { fetchState, post, statusDot, escapeHtml } from "/assets/app.js";
+
+      const app = document.getElementById("app");
+      const tunnelTag = document.getElementById("tunnel");
+      let masterName = "geral";
+
+      function runnerRow(r) {
+        return `<a class="row" href="/r/${r.id}">
+          ${statusDot(r.status, r.live)}
+          <span class="name">${escapeHtml(r.name)}</span>
+          <span class="kind">${r.kind === "shell" ? "sh" : ""}</span>
+          <span style="color:var(--muted)">›</span>
+        </a>`;
+      }
+
+      function render(state) {
+        masterName = state.master || "geral";
+        tunnelTag.textContent = state.tunnel ? "túnel ativo" : "local";
+        tunnelTag.className = "tag " + (state.tunnel ? "on" : "off");
+
+        const projects = state.projects || [];
+        const master = projects.find(
+          (p) => p.name.toLowerCase() === masterName.toLowerCase(),
+        );
+        const rest = projects.filter((p) => p !== master);
+        let html = "";
+
+        if (master) {
+          const r =
+            master.runners.find(
+              (x) => x.name.toLowerCase() === masterName.toLowerCase(),
+            ) || master.runners[0];
+          if (r) {
+            html += `<div class="master">
+              ${statusDot(r.status, r.live)}
+              <div class="who">
+                <b>${escapeHtml(r.name)}</b>
+                <span>agente mestre · ${master.runners.length} runner${master.runners.length === 1 ? "" : "s"}</span>
+              </div>
+              <a class="icon primary" href="/r/${r.id}">abrir</a>
+            </div>`;
+          }
+          const others = master.runners.filter((x) => x !== r);
+          if (others.length) {
+            html += section(master, others);
+          }
+        }
+
+        for (const p of rest) html += section(p, p.runners);
+        if (!projects.length)
+          html = `<div class="empty">nenhum projeto ainda</div>`;
+        app.innerHTML = html;
+      }
+
+      function section(p, runners) {
+        return `<section class="project" data-project="${p.id}">
+          <div class="head"><b>${escapeHtml(p.name)}</b><span>${escapeHtml(p.folders?.[0] || "")}</span></div>
+          <div class="rows">
+            ${runners.map(runnerRow).join("")}
+            <button class="row add" data-add="${p.id}">+ novo agente</button>
+          </div>
+        </section>`;
+      }
+
+      async function load() {
+        try {
+          render(await fetchState());
+        } catch (e) {
+          app.innerHTML = `<div class="empty">sem conexão com o Cosmos</div>`;
+        }
+      }
+
+      app.addEventListener("click", async (e) => {
+        const add = e.target.closest("[data-add]");
+        if (!add) return;
+        const name = prompt("Nome do agente");
+        if (!name) return;
+        await post(`/api/project/${add.dataset.add}/agent`, { name });
+        load();
+      });
+
+      document.getElementById("refresh").addEventListener("click", load);
+      load();
+      setInterval(load, 4000);
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) load();
+      });
+    </script>
+  </body>
+</html>

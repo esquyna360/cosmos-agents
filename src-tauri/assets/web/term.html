@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"
+    />
+    <meta name="theme-color" content="#0b0d10" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Cosmos</title>
+    <link rel="stylesheet" href="/assets/xterm.css" />
+    <link rel="stylesheet" href="/assets/app.css" />
+  </head>
+  <body class="term">
+    <header class="bar">
+      <a class="icon" href="/" aria-label="Voltar">‹</a>
+      <span id="dot" style="display: inline-flex"></span>
+      <h1 id="title">…</h1>
+      <button class="icon" id="menu" aria-label="Menu">⋯</button>
+    </header>
+
+    <div id="screen"><div class="scaler" id="scaler"></div></div>
+
+    <div class="keys" id="keys">
+      <button data-seq="\u001b">esc</button>
+      <button data-seq="\u001b[A">↑</button>
+      <button data-seq="\u001b[B">↓</button>
+      <button data-seq="\u001b[D">←</button>
+      <button data-seq="\u001b[C">→</button>
+      <button data-seq="\t">tab</button>
+      <button data-seq="\r">⏎</button>
+      <button data-seq="\n">⇧⏎</button>
+      <button data-seq="\u0003">^C</button>
+      <button data-seq="\u007f">⌫</button>
+      <button id="raw">teclado</button>
+    </div>
+
+    <form class="composer" id="composer">
+      <textarea
+        id="input"
+        rows="1"
+        placeholder="Mensagem para o agente…"
+        autocapitalize="sentences"
+        autocorrect="on"
+      ></textarea>
+      <button class="send" type="submit">↑</button>
+    </form>
+
+    <div class="sheet" id="sheet">
+      <div class="panel">
+        <button id="act-zoom-in">Aumentar (zoom +)</button>
+        <button id="act-zoom-out">Diminuir (zoom −)</button>
+        <button id="act-fit">Modo: <span id="fitlabel">escala</span></button>
+        <hr />
+        <button id="act-revive">Reviver sessão</button>
+        <button id="act-kill" class="danger">Matar sessão</button>
+        <hr />
+        <button id="act-close">Fechar</button>
+      </div>
+    </div>
+
+    <script src="/assets/xterm.js"></script>
+    <script src="/assets/addon-fit.js"></script>
+    <script type="module">
+      import { fetchState, post, statusDot } from "/assets/app.js";
+
+      const id = location.pathname.split("/").pop();
+      const screen = document.getElementById("screen");
+      const scaler = document.getElementById("scaler");
+      const titleEl = document.getElementById("title");
+      const dotEl = document.getElementById("dot");
+      const input = document.getElementById("input");
+
+      const store = {
+        get zoom() {
+          return Number(localStorage.getItem("cosmos.zoom") || 1);
+        },
+        set zoom(v) {
+          localStorage.setItem("cosmos.zoom", String(v));
+        },
+        get fit() {
+          return localStorage.getItem("cosmos.fit") === "1";
+        },
+        set fit(v) {
+          localStorage.setItem("cosmos.fit", v ? "1" : "0");
+        },
+      };
+
+      const term = new Terminal({
+        fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
+        fontSize: 13,
+        lineHeight: 1.2,
+        cursorBlink: true,
+        scrollback: 10000,
+        allowProposedApi: true,
+        theme: {
+          background: "#0b0d10",
+          foreground: "#e6e6e6",
+          cursor: "#e6e6e6",
+          selectionBackground: "#3a3f4b",
+        },
+      });
+      const fitAddon = new FitAddon.FitAddon();
+      term.loadAddon(fitAddon);
+      term.open(scaler);
+
+      // Scale mode keeps the PTY at whatever size the desktop window set and
+      // shrinks the pixels to fit the phone — two viewers, one geometry, no
+      // reflow war. Fit mode is the opt-in that actually resizes the PTY.
+      function applyScale() {
+        if (store.fit) {
+          scaler.style.transform = "";
+          scaler.style.width = "";
+          scaler.style.height = "";
+          screen.style.overflowX = "hidden";
+          fitAddon.fit();
+          send({ t: "r", c: term.cols, r: term.rows });
+          return;
+        }
+        const el = scaler.querySelector(".xterm-screen");
+        if (!el) return;
+        const natural = el.offsetWidth;
+        if (!natural) return;
+        const avail = screen.clientWidth - 12;
+        const scale = (avail / natural) * store.zoom;
+        scaler.style.transform = `scale(${scale})`;
+        scaler.style.width = `${natural}px`;
+        scaler.style.height = `${el.offsetHeight * scale}px`;
+        screen.style.overflowX = scale * natural > avail ? "auto" : "hidden";
+      }
+
+      let ws;
+      let backoff = 500;
+      let alive = false;
+
+      function send(msg) {
+        if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+      }
+
+      function write(text) {
+        send({ t: "i", d: text });
+      }
+
+      function connect() {
+        const proto = location.protocol === "https:" ? "wss" : "ws";
+        ws = new WebSocket(`${proto}://${location.host}/ws/${id}`);
+        ws.binaryType = "arraybuffer";
+
+        ws.onmessage = (ev) => {
+          if (typeof ev.data === "string") {
+            const msg = JSON.parse(ev.data);
+            if (msg.t === "meta") {
+              alive = true;
+              if (!store.fit) term.resize(msg.cols, msg.rows);
+              requestAnimationFrame(applyScale);
+            } else if (msg.t === "dead") {
+              alive = false;
+              term.writeln(
+                "\r\n\x1b[33msessão sem PTY. abra o menu ⋯ e escolha \"Reviver sessão\".\x1b[0m",
+              );
+            }
+            return;
+          }
+          term.write(new Uint8Array(ev.data));
+        };
+
+        ws.onopen = () => {
+          backoff = 500;
+        };
+        ws.onclose = () => {
+          setTimeout(connect, backoff);
+          backoff = Math.min(backoff * 2, 8000);
+        };
+        ws.onerror = () => ws.close();
+      }
+
+      term.onData((d) => write(d));
+      term.onResize(() => requestAnimationFrame(applyScale));
+
+      // --- composer -------------------------------------------------------
+
+      function autogrow() {
+        input.style.height = "auto";
+        input.style.height = `${Math.min(input.scrollHeight, 132)}px`;
+      }
+      input.addEventListener("input", autogrow);
+
+      document.getElementById("composer").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const text = input.value;
+        if (!text.trim()) return;
+        write(text.replace(/\r/g, "") + "\r");
+        input.value = "";
+        autogrow();
+        input.focus();
+      });
+
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          document
+            .getElementById("composer")
+            .dispatchEvent(new Event("submit", { cancelable: true }));
+        }
+      });
+
+      document.getElementById("keys").addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-seq]");
+        if (!btn) return;
+        e.preventDefault();
+        write(JSON.parse(`"${btn.dataset.seq}"`));
+      });
+
+      document.getElementById("raw").addEventListener("click", (e) => {
+        e.preventDefault();
+        term.focus();
+      });
+
+      // --- menu -----------------------------------------------------------
+
+      const sheet = document.getElementById("sheet");
+      const fitLabel = document.getElementById("fitlabel");
+      fitLabel.textContent = store.fit ? "ajustar à tela" : "escala";
+
+      const openSheet = (v) => sheet.classList.toggle("open", v);
+      document.getElementById("menu").onclick = () => openSheet(true);
+      document.getElementById("act-close").onclick = () => openSheet(false);
+      sheet.onclick = (e) => {
+        if (e.target === sheet) openSheet(false);
+      };
+
+      document.getElementById("act-zoom-in").onclick = () => {
+        store.zoom = Math.min(store.zoom * 1.2, 4);
+        applyScale();
+      };
+      document.getElementById("act-zoom-out").onclick = () => {
+        store.zoom = Math.max(store.zoom / 1.2, 0.4);
+        applyScale();
+      };
+      document.getElementById("act-fit").onclick = () => {
+        store.fit = !store.fit;
+        fitLabel.textContent = store.fit ? "ajustar à tela" : "escala";
+        applyScale();
+      };
+      document.getElementById("act-revive").onclick = async () => {
+        await post(`/api/runner/${id}/spawn`);
+        openSheet(false);
+        location.reload();
+      };
+      document.getElementById("act-kill").onclick = async () => {
+        if (!confirm("Matar esta sessão?")) return;
+        await post(`/api/runner/${id}/kill`);
+        location.href = "/";
+      };
+
+      // --- status ---------------------------------------------------------
+
+      async function poll() {
+        try {
+          const state = await fetchState();
+          for (const p of state.projects || []) {
+            const r = (p.runners || []).find((x) => x.id === id);
+            if (!r) continue;
+            titleEl.textContent = r.name;
+            document.title = `${r.name} · Cosmos`;
+            dotEl.innerHTML = statusDot(r.status, r.live);
+            return;
+          }
+        } catch {}
+      }
+
+      window.addEventListener("resize", () => requestAnimationFrame(applyScale));
+      window.addEventListener("orientationchange", () =>
+        setTimeout(applyScale, 300),
+      );
+
+      connect();
+      poll();
+      setInterval(poll, 3000);
+    </script>
+  </body>
+</html>
