@@ -365,6 +365,9 @@ fn runners_update(
         .into_iter()
         .find(|r| r.id == id)
         .ok_or_else(|| "runner not found".to_string())?;
+    if found.kind == "agent" {
+        projects::set_session_name_in_args(&mut found.args, &name);
+    }
     found.name = name;
     found.last_active = now_unix();
     let row = projects::runner_record_to_row(&found).map_err(|e| e.to_string())?;

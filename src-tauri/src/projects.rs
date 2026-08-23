@@ -467,6 +467,29 @@ pub fn create_project(
 }
 
 /// Builds an in-memory runner record with the canonical defaults for `kind`,
+/// Rewrites a claude exec line so the session boots already named after the
+/// runner (Claude Code's `--name` sets picker + terminal title). Idempotent:
+/// strips a previously injected `--name` before appending, so renames just
+/// call it again. No-op for non-claude commands (e.g. codex preset).
+pub fn set_session_name_in_args(args: &mut [String], name: &str) {
+    const NEEDLE: &str = "claude --dangerously-skip-permissions";
+    const MARK: &str = " --name ";
+    for arg in args.iter_mut() {
+        if !arg.contains(NEEDLE) {
+            continue;
+        }
+        if let Some(i) = arg.find(MARK) {
+            arg.truncate(i);
+        }
+        #[cfg(unix)]
+        let escaped = format!("'{}'", name.replace('\'', "'\\''"));
+        #[cfg(windows)]
+        let escaped = format!("'{}'", name.replace('\'', "''"));
+        arg.push_str(MARK);
+        arg.push_str(&escaped);
+    }
+}
+
 /// without persisting or spawning. Caller is responsible for upsert + PTY
 /// spawn. Pulled out so the IPC server and tauri commands share defaulting.
 pub fn build_runner_record(
@@ -486,7 +509,10 @@ pub fn build_runner_record(
         (DEFAULT_AGENT_PROGRAM, DEFAULT_AGENT_ARGS)
     };
     let program = program.unwrap_or_else(|| default_program.to_string());
-    let args = args.unwrap_or_else(|| default_args.iter().map(|s| s.to_string()).collect());
+    let mut args = args.unwrap_or_else(|| default_args.iter().map(|s| s.to_string()).collect());
+    if kind_clean == "agent" {
+        set_session_name_in_args(&mut args, &name);
+    }
     let with_status_fsm = kind_clean == "agent";
     RunnerRecord {
         id: new_id,
