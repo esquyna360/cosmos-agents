@@ -377,3 +377,159 @@ body.term {
   border-top: 1px solid var(--line);
   margin: 4px 0;
 }
+
+/* ---------------------------------------------------------------- cosmos */
+
+#sky {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  background: radial-gradient(
+    120% 90% at 50% 12%,
+    #101827 0%,
+    #08090d 62%,
+    #050609 100%
+  );
+  touch-action: none;
+}
+
+#sky[hidden] {
+  display: none;
+}
+
+#sky canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#sky .overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.orb-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  white-space: nowrap;
+  transition: opacity 0.25s ease;
+  will-change: transform;
+}
+
+.orb-label b {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  color: rgba(255, 255, 255, 0.94);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.85);
+}
+
+.orb-label span {
+  font-size: 10px;
+  letter-spacing: 0.2px;
+  color: var(--muted);
+  text-shadow: 0 1px 5px rgba(0, 0, 0, 0.9);
+}
+
+.orb-label.center b {
+  font-size: 15px;
+}
+
+.orb-label:active {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.orb-label[data-status="awaiting_input"] span {
+  color: var(--warn);
+}
+
+.orb-label[data-status="error"] span {
+  color: var(--bad);
+}
+
+.orb-label[data-status="streaming"] span,
+.orb-label[data-status="tool_running"] span {
+  color: var(--accent);
+}
+
+.orb-label[data-status="running"] span {
+  color: var(--ok);
+}
+
+.summary {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(16px + var(--safe-b));
+  display: flex;
+  gap: 7px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(11, 13, 16, 0.72);
+  backdrop-filter: blur(10px);
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  max-width: calc(100% - 28px);
+  overflow: hidden;
+}
+
+.summary i {
+  font-style: normal;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.summary.alert {
+  border-color: rgba(245, 158, 11, 0.45);
+  background: rgba(58, 40, 8, 0.75);
+  color: var(--warn);
+}
+
+.summary.alert i {
+  color: var(--warn);
+}
+
+body.sky {
+  overflow: hidden;
+}
+
+body.sky main {
+  display: none;
+}
+
+#view.on {
+  border-color: rgba(110, 193, 255, 0.4);
+  background: rgba(110, 193, 255, 0.12);
+  color: var(--accent);
+}
+
+.orb-label.dim b {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.ring-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  font-size: 10px;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  color: rgba(139, 147, 161, 0.72);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+  white-space: nowrap;
+  transition: opacity 0.25s ease;
+  will-change: transform;
+}

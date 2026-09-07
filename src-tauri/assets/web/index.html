@@ -16,16 +16,29 @@
     <header class="bar">
       <h1>Cosmos</h1>
       <span class="tag" id="tunnel">…</span>
+      <button class="icon" id="view" aria-label="Alternar visão">◎</button>
       <button class="icon" id="refresh" aria-label="Atualizar">↻</button>
     </header>
     <main id="app"><div class="empty">carregando…</div></main>
+
+    <div id="sky" hidden>
+      <canvas id="sky-canvas"></canvas>
+      <div class="overlay" id="sky-overlay"></div>
+      <div class="summary" id="sky-summary"></div>
+    </div>
 
     <script type="module">
       import { fetchState, post, statusDot, escapeHtml } from "/assets/app.js";
 
       const app = document.getElementById("app");
       const tunnelTag = document.getElementById("tunnel");
+      const sky = document.getElementById("sky");
+      const summary = document.getElementById("sky-summary");
+      const viewBtn = document.getElementById("view");
       let masterName = "geral";
+      let cosmos = null;
+      let last = null;
+      let mode = localStorage.getItem("cosmos.view") === "sky" ? "sky" : "list";
 
       function runnerRow(r) {
         return `<a class="row" href="/r/${r.id}">
@@ -85,9 +98,94 @@
         </section>`;
       }
 
+      // ------------------------------------------------------------ sky
+
+      const SUMMARY_ORDER = [
+        ["awaiting_input", "esperando você"],
+        ["error", "com erro"],
+        ["streaming", "escrevendo"],
+        ["tool_running", "em ferramenta"],
+        ["running", "rodando"],
+        ["idle", "parado"],
+        ["offline", "desligado"],
+      ];
+
+      function paintSummary(state) {
+        const counts = {};
+        for (const p of state.projects || []) {
+          for (const r of p.runners || []) {
+            const s = r.live ? r.status || "idle" : "offline";
+            counts[s] = (counts[s] || 0) + 1;
+          }
+        }
+        const parts = SUMMARY_ORDER.filter(([k]) => counts[k]).map(
+          ([k, label]) => `<span><i>${counts[k]}</i> ${label}</span>`,
+        );
+        summary.innerHTML = parts.join("<span>·</span>") || "<span>vazio</span>";
+        summary.classList.toggle("alert", !!counts.awaiting_input);
+      }
+
+      async function ensureCosmos() {
+        if (cosmos !== null) return cosmos;
+        try {
+          const mod = await import("/assets/cosmos.js");
+          cosmos = mod.createCosmos(
+            document.getElementById("sky-canvas"),
+            document.getElementById("sky-overlay"),
+          );
+        } catch (e) {
+          cosmos = false;
+        }
+        if (!cosmos) return false;
+        cosmos.onPick((body) => {
+          location.href = `/r/${body.id}`;
+        });
+        return cosmos;
+      }
+
+      async function applyMode() {
+        const wantSky = mode === "sky";
+        viewBtn.classList.toggle("on", wantSky);
+        viewBtn.textContent = wantSky ? "☰" : "◎";
+        if (!wantSky) {
+          document.body.classList.remove("sky");
+          sky.hidden = true;
+          if (cosmos) cosmos.stop();
+          return;
+        }
+        const c = await ensureCosmos();
+        if (!c) {
+          mode = "list";
+          localStorage.setItem("cosmos.view", "list");
+          viewBtn.hidden = true;
+          return;
+        }
+        document.body.classList.add("sky");
+        sky.hidden = false;
+        c.resume();
+        if (last) {
+          c.setState(last);
+          paintSummary(last);
+        }
+      }
+
+      viewBtn.addEventListener("click", () => {
+        mode = mode === "sky" ? "list" : "sky";
+        localStorage.setItem("cosmos.view", mode);
+        applyMode();
+      });
+
+      // ------------------------------------------------------------ data
+
       async function load() {
         try {
-          render(await fetchState());
+          const state = await fetchState();
+          last = state;
+          render(state);
+          if (mode === "sky" && cosmos) {
+            cosmos.setState(state);
+            paintSummary(state);
+          }
         } catch (e) {
           app.innerHTML = `<div class="empty">sem conexão com o Cosmos</div>`;
         }
@@ -103,10 +201,15 @@
       });
 
       document.getElementById("refresh").addEventListener("click", load);
-      load();
+      load().then(applyMode);
       setInterval(load, 4000);
       document.addEventListener("visibilitychange", () => {
-        if (!document.hidden) load();
+        if (document.hidden) {
+          if (cosmos) cosmos.stop();
+        } else {
+          if (mode === "sky" && cosmos) cosmos.resume();
+          load();
+        }
       });
     </script>
   </body>

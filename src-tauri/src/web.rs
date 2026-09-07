@@ -184,6 +184,7 @@ async fn asset(AxPath(file): AxPath<String>) -> Response {
         "xterm.css" => (include_str!("../assets/web/xterm.css"), "text/css"),
         "app.css" => (include_str!("../assets/web/app.css"), "text/css"),
         "app.js" => (include_str!("../assets/web/app.js"), "text/javascript"),
+        "cosmos.js" => (include_str!("../assets/web/cosmos.js"), "text/javascript"),
         _ => return (StatusCode::NOT_FOUND, "not found").into_response(),
     };
     Response::builder()
