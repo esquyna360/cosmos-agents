@@ -161,7 +161,8 @@ fi
 # --- install macOS build locally --------------------------------------------
 if [[ $DO_INSTALL -eq 1 ]]; then
   log "Downloading macOS bundle from release $TAG"
-  WORK="$(mktemp -d -t cosmos-release-XXXXXX)"
+  mkdir -p "$HOME/code/.dev-logs"
+  WORK="$(mktemp -d "$HOME/code/.dev-logs/cosmos-release-XXXXXX")"
   trap 'rm -rf "$WORK"' EXIT
 
   if [[ $DRY_RUN -eq 1 ]]; then
