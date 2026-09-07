@@ -60,7 +60,7 @@ pub fn ensure(app: &AppHandle) -> Result<()> {
             RunnerKind::from_str(&runner.kind),
             project.cwd.clone(),
             runner.program.clone(),
-            runner.args.clone(),
+            projects::spawn_args_for(&home, &runner, &project.cwd),
             SPAWN_COLS,
             SPAWN_ROWS,
         )?;

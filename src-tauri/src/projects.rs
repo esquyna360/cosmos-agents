@@ -34,6 +34,11 @@ pub struct RunnerRecord {
     pub with_status_fsm: bool,
     pub created_at: i64,
     pub last_active: i64,
+    /// Stable Claude Code session UUID. Pinned with `--session-id` on the
+    /// first spawn, replayed with `--resume` on every spawn after that, so
+    /// closing Cosmos no longer throws the conversation away.
+    #[serde(default)]
+    pub session_id: String,
 }
 
 pub fn projects_root(home: &Path) -> PathBuf {
@@ -356,6 +361,7 @@ pub fn runner_row_to_record(row: RunnerRow) -> Result<RunnerRecord> {
         with_status_fsm: row.with_status_fsm,
         created_at: row.created_at,
         last_active: row.last_active,
+        session_id: row.session_id,
     })
 }
 
@@ -373,6 +379,7 @@ pub fn runner_record_to_row(rec: &RunnerRecord) -> Result<RunnerRow> {
         with_status_fsm: rec.with_status_fsm,
         created_at: rec.created_at,
         last_active: rec.last_active,
+        session_id: rec.session_id.clone(),
     })
 }
 
@@ -467,27 +474,101 @@ pub fn create_project(
 }
 
 /// Builds an in-memory runner record with the canonical defaults for `kind`,
-/// Rewrites a claude exec line so the session boots already named after the
-/// runner (Claude Code's `--name` sets picker + terminal title). Idempotent:
-/// strips a previously injected `--name` before appending, so renames just
-/// call it again. No-op for non-claude commands (e.g. codex preset).
-pub fn set_session_name_in_args(args: &mut [String], name: &str) {
-    const NEEDLE: &str = "claude --dangerously-skip-permissions";
-    const MARK: &str = " --name ";
-    for arg in args.iter_mut() {
-        if !arg.contains(NEEDLE) {
-            continue;
-        }
-        if let Some(i) = arg.find(MARK) {
-            arg.truncate(i);
-        }
-        #[cfg(unix)]
-        let escaped = format!("'{}'", name.replace('\'', "'\\''"));
-        #[cfg(windows)]
-        let escaped = format!("'{}'", name.replace('\'', "''"));
-        arg.push_str(MARK);
-        arg.push_str(&escaped);
+/// The exec fragment every Claude preset ends with. Everything Cosmos appends
+/// after it (`--name`, `--session-id`, `--resume`) is injected at spawn time
+/// and never persisted, so a rename or a resume needs no row rewrite.
+const CLAUDE_NEEDLE: &str = "claude --dangerously-skip-permissions";
+
+fn shell_quote(v: &str) -> String {
+    #[cfg(unix)]
+    {
+        format!("'{}'", v.replace('\'', "'\\''"))
     }
+    #[cfg(windows)]
+    {
+        format!("'{}'", v.replace('\'', "''"))
+    }
+}
+
+/// Drops anything Cosmos previously appended to a claude exec line. Rows
+/// written by releases <= 0.1.5 persisted `--name '<runner>'`; we cut back to
+/// the canonical fragment so the spawn-time injector is the single source of
+/// truth. Non-claude commands (codex, shells, scripts) pass through untouched.
+fn strip_injected_flags(arg: &str) -> String {
+    match arg.find(CLAUDE_NEEDLE) {
+        None => arg.to_string(),
+        Some(i) => arg[..i + CLAUDE_NEEDLE.len()].to_string(),
+    }
+}
+
+/// Path encoding Claude Code uses for `~/.claude/projects/<encoded>/`: every
+/// non-alphanumeric byte becomes `-`. `/Users/bruno/.cosmos/projects/code`
+/// becomes `-Users-bruno--cosmos-projects-code`.
+fn encode_claude_project_dir(cwd: &str) -> String {
+    cwd.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
+}
+
+/// True when Claude has already written a transcript for `session_id` *under
+/// this cwd*, which is what makes `--resume` valid. Deliberately not a
+/// filesystem-wide search: Claude resolves `--resume` against the working
+/// directory, so a transcript found elsewhere would make the flag fail and
+/// take the PTY down with it. A miss degrades to a fresh `--session-id`,
+/// which is the safe direction.
+pub fn claude_session_exists(home: &Path, cwd: &str, session_id: &str) -> bool {
+    if session_id.is_empty() {
+        return false;
+    }
+    home.join(".claude")
+        .join("projects")
+        .join(encode_claude_project_dir(cwd))
+        .join(format!("{session_id}.jsonl"))
+        .exists()
+}
+
+/// Builds the args a PTY actually launches with. Persisted args stay generic;
+/// the runner's display name and its session handle are folded in here.
+/// `resume` picks `--resume` (transcript exists) over `--session-id` (first
+/// boot, pins the id Claude will write under).
+pub fn build_spawn_args(
+    args: &[String],
+    name: &str,
+    session_id: &str,
+    resume: bool,
+) -> Vec<String> {
+    args.iter()
+        .map(|a| {
+            if !a.contains(CLAUDE_NEEDLE) {
+                return a.clone();
+            }
+            let mut line = strip_injected_flags(a);
+            line.push_str(" --name ");
+            line.push_str(&shell_quote(name));
+            if !session_id.is_empty() {
+                line.push_str(if resume { " --resume " } else { " --session-id " });
+                line.push_str(session_id);
+            }
+            line
+        })
+        .collect()
+}
+
+/// True when this runner's command is a Claude preset — the only CLI whose
+/// session flags we know how to drive.
+pub fn is_claude_command(args: &[String]) -> bool {
+    args.iter().any(|a| a.contains(CLAUDE_NEEDLE))
+}
+
+/// The one place that turns a persisted runner into a launchable command
+/// line. Every spawn path (tauri command, IPC server, master boot) goes
+/// through it, so none of them can drift on session handling.
+pub fn spawn_args_for(home: &Path, rec: &RunnerRecord, cwd: &str) -> Vec<String> {
+    if rec.kind != "agent" {
+        return rec.args.clone();
+    }
+    let resume = claude_session_exists(home, cwd, &rec.session_id);
+    build_spawn_args(&rec.args, &rec.name, &rec.session_id, resume)
 }
 
 /// without persisting or spawning. Caller is responsible for upsert + PTY
@@ -509,11 +590,17 @@ pub fn build_runner_record(
         (DEFAULT_AGENT_PROGRAM, DEFAULT_AGENT_ARGS)
     };
     let program = program.unwrap_or_else(|| default_program.to_string());
-    let mut args = args.unwrap_or_else(|| default_args.iter().map(|s| s.to_string()).collect());
-    if kind_clean == "agent" {
-        set_session_name_in_args(&mut args, &name);
-    }
+    let args: Vec<String> =
+        args.unwrap_or_else(|| default_args.iter().map(|s| s.to_string()).collect());
     let with_status_fsm = kind_clean == "agent";
+    // Claude agents get their session handle at birth so the very first spawn
+    // can pin it with `--session-id`. Without that, Claude picks a random id
+    // we'd have no way to resume later.
+    let session_id = if kind_clean == "agent" && is_claude_command(&args) {
+        session_uuid()
+    } else {
+        String::new()
+    };
     RunnerRecord {
         id: new_id,
         project_id,
@@ -525,7 +612,15 @@ pub fn build_runner_record(
         with_status_fsm,
         created_at,
         last_active: created_at,
+        session_id,
     }
+}
+
+/// UUID v4 for a Claude session handle. Same generator the rest of the crate
+/// uses; re-exported here so `build_runner_record` stays callable from both
+/// the tauri commands and the IPC server.
+fn session_uuid() -> String {
+    crate::uuid_v4_for_ipc()
 }
 
 /// Pre-approve the "Do you trust the files in this folder?" dialog for Claude
@@ -591,4 +686,83 @@ pub fn dedupe_folders(folders: Vec<String>) -> Vec<String> {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const CLAUDE_LINE: &str = "exec env CLAUDE_CODE_NO_FLICKER=1 claude --dangerously-skip-permissions";
+
+    #[test]
+    fn first_spawn_pins_the_session_id() {
+        let args = vec!["-i".into(), "-l".into(), "-c".into(), CLAUDE_LINE.into()];
+        let out = build_spawn_args(&args, "main", "abc-123", false);
+        assert_eq!(out[3], format!("{CLAUDE_LINE} --name 'main' --session-id abc-123"));
+    }
+
+    #[test]
+    fn later_spawns_resume_that_session() {
+        let args = vec!["-c".into(), CLAUDE_LINE.into()];
+        let out = build_spawn_args(&args, "main", "abc-123", true);
+        assert_eq!(out[1], format!("{CLAUDE_LINE} --name 'main' --resume abc-123"));
+    }
+
+    /// Rows written before 0.1.6 persisted an injected `--name`. Injection has
+    /// to be idempotent or every respawn would stack another flag on.
+    #[test]
+    fn legacy_injected_name_is_stripped_not_stacked() {
+        let legacy = format!("{CLAUDE_LINE} --name 'old'");
+        let out = build_spawn_args(&[legacy], "novo", "s1", false);
+        assert_eq!(out[0], format!("{CLAUDE_LINE} --name 'novo' --session-id s1"));
+        let twice = build_spawn_args(&out, "novo", "s1", false);
+        assert_eq!(twice, out);
+    }
+
+    #[test]
+    fn non_claude_commands_pass_through() {
+        let args = vec!["-i".into(), "-l".into(), "-c".into(), "exec pnpm dev".into()];
+        assert_eq!(build_spawn_args(&args, "dev", "s1", true), args);
+        assert!(!is_claude_command(&args));
+    }
+
+    /// Must match what Claude Code actually names the dir, or `--resume` never
+    /// fires and every restart silently starts a new conversation.
+    #[test]
+    fn project_dir_encoding_matches_claude() {
+        assert_eq!(
+            encode_claude_project_dir("/Users/bruno/.cosmos/projects/code"),
+            "-Users-bruno--cosmos-projects-code"
+        );
+        assert_eq!(
+            encode_claude_project_dir("/Users/bruno/code/metamorfosis_flutter"),
+            "-Users-bruno-code-metamorfosis-flutter"
+        );
+    }
+
+    #[test]
+    fn shells_get_no_session_handle() {
+        let rec = build_runner_record(
+            "r1".into(),
+            "p1".into(),
+            "shell".into(),
+            "dev".into(),
+            None,
+            None,
+            None,
+            0,
+        );
+        assert!(rec.session_id.is_empty());
+        let agent = build_runner_record(
+            "r2".into(),
+            "p1".into(),
+            "agent".into(),
+            "main".into(),
+            None,
+            None,
+            None,
+            0,
+        );
+        assert!(!agent.session_id.is_empty());
+    }
 }

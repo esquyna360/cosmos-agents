@@ -66,8 +66,55 @@ fn pty_spawn(
             .map(|r| r.slug)
             .unwrap_or_default()
     };
+    // Fold in the runner's name + session handle. The row is the authority:
+    // persisted args stay generic, so a rename or a resume never needs a row
+    // rewrite, and a legacy row that still carries an injected `--name` gets
+    // cleaned up on its way to the PTY.
+    let args = match store
+        .runners_get(&id)
+        .ok()
+        .flatten()
+        .and_then(|row| projects::runner_row_to_record(row).ok())
+    {
+        Some(rec) => {
+            let home = home_dir(&app).unwrap_or_default();
+            projects::spawn_args_for(&home, &rec, &cwd)
+        }
+        None => args,
+    };
     sup.spawn_with_slug(app, id, project_id, project_slug, kind, cwd, program, args, cols, rows)
         .map_err(|e| e.to_string())
+}
+
+/// Stop a runner's PTY without deleting the row. This is what the UI's close
+/// button does now: the conversation stays resumable, and reopening the tab
+/// respawns with `--resume`.
+#[tauri::command]
+fn runners_stop(sup: State<'_, PtySupervisor>, id: String) -> Result<(), String> {
+    sup.kill(&id).map_err(|e| e.to_string())
+}
+
+/// Stop every runner in a project without deleting anything. Closing a
+/// project is a view operation, not a destructive one — `projects_delete`
+/// stays available behind an explicit confirm in the editor modal.
+#[tauri::command]
+fn projects_close(sup: State<'_, PtySupervisor>, id: String) -> Result<(), String> {
+    sup.kill_project(&id).map_err(|e| e.to_string())
+}
+
+/// Drop the stored session handle and mint a new one, so the next spawn
+/// starts a clean conversation instead of resuming the old transcript.
+#[tauri::command]
+fn runners_reset_session(store: State<'_, Store>, id: String) -> Result<(), String> {
+    let mut row = store
+        .runners_get(&id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "runner not found".to_string())?;
+    if !row.session_id.is_empty() {
+        row.session_id = uuid_v4();
+    }
+    row.last_active = now_unix();
+    store.runners_upsert(&row).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -369,9 +416,6 @@ fn runners_update(
         .into_iter()
         .find(|r| r.id == id)
         .ok_or_else(|| "runner not found".to_string())?;
-    if found.kind == "agent" {
-        projects::set_session_name_in_args(&mut found.args, &name);
-    }
     found.name = name;
     found.last_active = now_unix();
     let row = projects::runner_record_to_row(&found).map_err(|e| e.to_string())?;
@@ -530,19 +574,6 @@ pub fn run() {
             projects::migrate_to_synthetic_cwd(&store, &home)?;
             app.manage(store);
 
-            #[cfg(target_os = "macos")]
-            {
-                use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
-                if let Some(win) = app.get_webview_window("main") {
-                    let _ = apply_vibrancy(
-                        &win,
-                        NSVisualEffectMaterial::HudWindow,
-                        Some(NSVisualEffectState::Active),
-                        None,
-                    );
-                }
-            }
-
             // The master agent comes up before anything else touches the UI:
             // Cosmos should never open on an empty room.
             if let Err(e) = master::ensure(app.handle()) {
@@ -600,6 +631,9 @@ pub fn run() {
             runners_create,
             runners_update,
             runners_delete,
+            runners_stop,
+            runners_reset_session,
+            projects_close,
             pty_kill_project,
             memories_list,
             memories_upsert,

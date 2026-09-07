@@ -269,6 +269,16 @@ fn resolve_project(app: &AppHandle, handle: &str) -> Result<ProjectRecord> {
 /// Persist a runner record, then spawn its PTY against the project's cwd
 /// using the canonical agent/shell defaults. Emits `runners-changed` so the
 /// sidebar refreshes.
+/// Home dir for session-file lookups. Falls back to an empty path, which just
+/// means `claude_session_exists` returns false and the spawn pins a fresh id.
+fn home_dir() -> PathBuf {
+    #[cfg(windows)]
+    let var = "USERPROFILE";
+    #[cfg(not(windows))]
+    let var = "HOME";
+    std::env::var_os(var).map(PathBuf::from).unwrap_or_default()
+}
+
 fn spawn_runner(
     app: &AppHandle,
     project: &ProjectRecord,
@@ -299,7 +309,7 @@ fn spawn_runner(
         runner_kind,
         project.cwd.clone(),
         rec.program.clone(),
-        rec.args.clone(),
+        projects::spawn_args_for(&home_dir(), &rec, &project.cwd),
         SPAWN_COLS,
         SPAWN_ROWS,
     )?;

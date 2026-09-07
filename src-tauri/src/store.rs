@@ -62,6 +62,10 @@ pub struct RunnerRow {
     pub with_status_fsm: bool,
     pub created_at: i64,
     pub last_active: i64,
+    /// UUID handed to `claude --session-id` on first spawn and to
+    /// `claude --resume` on every respawn after that. Empty for shells and
+    /// for agent presets whose CLI we don't know how to resume.
+    pub session_id: String,
 }
 
 impl Store {
@@ -116,7 +120,8 @@ impl Store {
                 env_json        TEXT NOT NULL DEFAULT '{}',
                 with_status_fsm INTEGER NOT NULL DEFAULT 1,
                 created_at      INTEGER NOT NULL,
-                last_active     INTEGER NOT NULL
+                last_active     INTEGER NOT NULL,
+                session_id      TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_runners_project ON runners(project_id);
             CREATE INDEX IF NOT EXISTS idx_runners_last_active ON runners(last_active DESC);
@@ -145,6 +150,30 @@ impl Store {
         }
         if user_version < 2 {
             Self::migrate_v1_to_v2(&mut conn)?;
+        }
+        if user_version < 3 {
+            Self::migrate_v2_to_v3(&mut conn)?;
+        }
+        Ok(())
+    }
+
+    /// Generic idempotent column add. SQLite has no `ADD COLUMN IF NOT
+    /// EXISTS`, so we inspect the schema first.
+    fn ensure_column(tx: &rusqlite::Transaction<'_>, table: &str, column: &str, decl: &str) -> Result<()> {
+        let exists = {
+            let mut stmt = tx.prepare(&format!("PRAGMA table_info({table})"))?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            let mut found = false;
+            for r in rows {
+                if r? == column {
+                    found = true;
+                    break;
+                }
+            }
+            found
+        };
+        if !exists {
+            tx.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {decl}"))?;
         }
         Ok(())
     }
@@ -296,6 +325,31 @@ impl Store {
         Ok(())
     }
 
+    /// v2 → v3: `runners.session_id`. Existing agent rows get a fresh UUID,
+    /// so their *next* spawn pins a stable session that every later respawn
+    /// resumes. History before this release isn't recoverable — Claude never
+    /// got told which id to write under.
+    fn migrate_v2_to_v3(conn: &mut Connection) -> Result<()> {
+        let tx = conn.transaction()?;
+        Self::ensure_column(&tx, "runners", "session_id", "TEXT NOT NULL DEFAULT ''")?;
+        let ids: Vec<String> = {
+            let mut stmt = tx.prepare(
+                "SELECT id FROM runners WHERE kind = 'agent' AND (session_id = '' OR session_id IS NULL)",
+            )?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for id in ids {
+            tx.execute(
+                "UPDATE runners SET session_id = ?1 WHERE id = ?2",
+                params![crate::uuid_v4_for_ipc(), id],
+            )?;
+        }
+        tx.execute_batch("PRAGMA user_version = 3")?;
+        tx.commit().context("committing v2→v3 migration")?;
+        Ok(())
+    }
+
     /* ---------------------------- projects ---------------------------- */
 
     pub fn projects_list(&self) -> Result<Vec<ProjectRow>> {
@@ -397,7 +451,7 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, project_id, kind, name, program, args_json, env_json, \
-                    with_status_fsm, created_at, last_active \
+                    with_status_fsm, created_at, last_active, session_id \
              FROM runners ORDER BY last_active DESC",
         )?;
         let rows = stmt
@@ -413,10 +467,38 @@ impl Store {
                     with_status_fsm: row.get::<_, i64>(7)? != 0,
                     created_at: row.get(8)?,
                     last_active: row.get(9)?,
+                    session_id: row.get(10)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
+    }
+
+    pub fn runners_get(&self, id: &str) -> Result<Option<RunnerRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, project_id, kind, name, program, args_json, env_json, \
+                    with_status_fsm, created_at, last_active, session_id \
+             FROM runners WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query(params![id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(RunnerRow {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                kind: row.get(2)?,
+                name: row.get(3)?,
+                program: row.get(4)?,
+                args_json: row.get(5)?,
+                env_json: row.get(6)?,
+                with_status_fsm: row.get::<_, i64>(7)? != 0,
+                created_at: row.get(8)?,
+                last_active: row.get(9)?,
+                session_id: row.get(10)?,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn runners_upsert(&self, row: &RunnerRow) -> Result<()> {
@@ -425,8 +507,8 @@ impl Store {
             r#"
             INSERT INTO runners
                 (id, project_id, kind, name, program, args_json, env_json,
-                 with_status_fsm, created_at, last_active)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                 with_status_fsm, created_at, last_active, session_id)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
             ON CONFLICT(id) DO UPDATE SET
                 project_id = excluded.project_id,
                 kind = excluded.kind,
@@ -435,7 +517,8 @@ impl Store {
                 args_json = excluded.args_json,
                 env_json = excluded.env_json,
                 with_status_fsm = excluded.with_status_fsm,
-                last_active = excluded.last_active
+                last_active = excluded.last_active,
+                session_id = excluded.session_id
             "#,
             params![
                 row.id,
@@ -448,6 +531,7 @@ impl Store {
                 row.with_status_fsm as i64,
                 row.created_at,
                 row.last_active,
+                row.session_id,
             ],
         )?;
         Ok(())

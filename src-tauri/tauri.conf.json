@@ -10,18 +10,18 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",
         "title": "Cosmos",
-        "width": 1280,
-        "height": 800,
-        "minWidth": 720,
-        "minHeight": 480,
+        "width": 1440,
+        "height": 900,
+        "minWidth": 820,
+        "minHeight": 560,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "transparent": true
+        "acceptFirstMouse": true,
+        "backgroundColor": "#07080b"
       }
     ],
     "security": {

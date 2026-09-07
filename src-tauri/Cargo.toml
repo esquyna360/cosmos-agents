@@ -25,7 +25,7 @@ path = "src/bin/cosmos.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["macos-private-api"] }
+tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1.52.3", features = ["full"] }
@@ -34,7 +34,6 @@ bytes = "1.11.1"
 anyhow = "1.0.102"
 rusqlite = { version = "0.39.0", features = ["bundled"] }
 tauri-plugin-dialog = "2.7.1"
-window-vibrancy = "0.7.1"
 tauri-plugin-notification = "2.3.3"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
