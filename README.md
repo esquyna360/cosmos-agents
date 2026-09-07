@@ -26,8 +26,17 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
   into the multi-folder `.claude/CLAUDE.md` so Claude reads them every turn.
 - **Editor + Diff** view modes (CodeMirror 6 + `git diff`), state persisted
   per project so view switches don't lose the open tab.
-- Sidebar resizable; pinned secondary runner for side-by-side terminals
-  (`⌘\` within same project); markdown rendering via `marked`.
+- **Pane grid** — the main area is a grid of 1..4 panes: single, side by
+  side, stacked, quadrants, or main + 2. Each slot holds any runner of the
+  focused project and the assignment is remembered per project. A PTY is
+  attached in exactly one slot, so the grid de-dupes and back-fills as
+  runners come and go.
+- **Revivable sessions** — every agent runner owns a Claude session UUID.
+  First boot pins it with `--session-id`; later boots `--resume` it when the
+  transcript exists under `~/.claude/projects/`. Stopping a runner or
+  sleeping a project kills the PTY and keeps the row, so clicking it again
+  picks the conversation back up.
+- Sidebar resizable; markdown rendering via `marked`.
 
 ## Keymap
 
@@ -35,10 +44,13 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
 |---|---|
 | `⌘T` | new project |
 | `⌘⇧N` | new agent runner in current project |
-| `⌘W` | close current runner (closes the project if it was the last one) |
-| `⌘⇧W` | close current project |
+| `⌘W` | stop the focused runner (keeps it — click to resume) |
+| `⌘⇧W` | stop every runner of the project |
 | `⌘1–9` | focus N-th project |
-| `⌘\` | pin secondary runner within same project |
+| `⌘⌥1–5` | pane layout: single / side by side / stacked / quadrants / main + 2 |
+| `⌃1–4` | focus N-th pane |
+| `⌘\` | toggle split (single ↔ side by side) |
+| `⌘B` | show/hide the project sidebar |
 | `⌘E` | cycle view (runners → editor → diff → memory) |
 | `⌘P` / `⌘⇧F` | file palette / grep |
 | `⌘I` | toggle composer |
@@ -57,11 +69,30 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
 ## Storage
 
 - SQLite at `~/Library/Application Support/.../cosmos.sqlite` —
-  projects + runners (id, slug, kind, program, args, etc).
+  projects + runners (id, slug, kind, program, args, `session_id`, etc).
+  Schema version lives in `PRAGMA user_version`; migrations run on open.
 - Each project: `~/.cosmos/projects/<slug>/` (always materialized for memory
   storage; for multi-folder projects also contains `.claude/CLAUDE.md`).
 - Memory cards: `<project-dir>/memories/<title-slug>-<id>.md` with
   `<!-- cosmos-meta {...} -->` first line.
+
+## Install
+
+Builds live on **GitHub Releases**, one per tag:
+<https://github.com/esquyna360/cosmos-agents/releases>
+
+| platform | artifact |
+|---|---|
+| macOS Apple Silicon | `Cosmos_<ver>_aarch64.dmg` |
+| macOS Intel | `Cosmos_<ver>_x64.dmg` |
+| Windows | `Cosmos_<ver>_x64-setup.exe` |
+
+The app self-updates from `latest.json` on the same release, so after the
+first install you only need the dmg/exe again for a clean machine.
+
+Cutting a release: `scripts/release.sh minor` bumps the three version files,
+tags, pushes, waits for the Action, and drops the fresh macOS build into
+`/Applications`.
 
 ## Running locally
 
@@ -77,10 +108,9 @@ The release build (`pnpm tauri build`) produces a `.app` under
 
 ## Status
 
-Personal project. Works for me. Cross-platform is partial: Linux is close
-(small zsh-path tweaks needed), Windows needs more work (PowerShell default
-shell, path separator handling). The `macos-private-api` Tauri feature and
-NSVisualEffectView vibrancy are macOS-only and gated by `#[cfg]`.
+Personal project. Works for me. macOS is the primary target; Windows builds
+and runs (package-script runners go through PowerShell there). Linux is close
+— small zsh-path tweaks needed.
 
 ## License
 
