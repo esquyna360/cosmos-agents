@@ -130,18 +130,18 @@ export default function AgentCreatorModal(props: Props) {
 
   return (
     <div
-      class="absolute inset-0 z-50 flex items-start justify-center bg-black/45 backdrop-blur-sm"
+      class="fixed inset-0 z-50 flex items-start justify-center bg-sunken backdrop-blur-sm"
       onClick={(e) => {
         if (e.target === e.currentTarget) props.onClose();
       }}
     >
-      <div class="cx-sheet mt-16 w-[640px] max-w-[92vw] overflow-hidden rounded-cx border border-line bg-float shadow-2xl">
+      <div class="cx-glass cx-sheet mt-[10vh] max-h-[80vh] w-[640px] max-w-[92vw] overflow-y-auto rounded-cx-lg border border-line">
         <div class="flex items-center justify-between border-b border-line px-4 py-2.5">
           <div class="text-[10px] font-medium uppercase tracking-wider text-faint">
             {isEdit ? "editar projeto" : "novo projeto"}
           </div>
           <button
-            class="rounded-md p-1 text-faint transition hover:bg-white/10 hover:text-ink"
+            class="rounded-md p-1 text-faint transition hover:bg-fill-3 hover:text-ink"
             onClick={props.onClose}
             title="fechar (esc)"
           >
@@ -152,7 +152,7 @@ export default function AgentCreatorModal(props: Props) {
         <div class="space-y-3 p-4">
           <FieldLabel>nome</FieldLabel>
           <input
-            class="w-full rounded-lg border border-line bg-black/30 px-3 py-2 text-[13px] text-ink outline-none transition focus:border-white/25"
+            class="w-full rounded-lg border border-line bg-sunken px-3 py-2 text-[13px] text-ink outline-none transition focus:border-line-strong"
             value={name()}
             placeholder={folders()[0] ? basenameOf(folders()[0]) : "ex.: cosmos fullstack"}
             onInput={(e) => setName(e.currentTarget.value)}
@@ -163,7 +163,7 @@ export default function AgentCreatorModal(props: Props) {
               pastas ({folders().length}/{MAX_FOLDERS})
             </FieldLabel>
             <button
-              class="flex items-center gap-1 rounded-lg border border-line px-2 py-1 text-[11px] text-dim transition hover:border-white/25 hover:bg-white/6 hover:text-ink disabled:opacity-40"
+              class="flex items-center gap-1 rounded-lg border border-line px-2 py-1 text-[11px] text-dim transition hover:border-line-strong hover:bg-fill-2 hover:text-ink disabled:opacity-40"
               onClick={addFolder}
               disabled={folders().length >= MAX_FOLDERS}
             >
@@ -182,12 +182,12 @@ export default function AgentCreatorModal(props: Props) {
             <ul class="space-y-1">
               <For each={folders()}>
                 {(f) => (
-                  <li class="flex items-center justify-between rounded-lg border border-line bg-black/30 px-3 py-1.5 text-[11.5px]">
+                  <li class="flex items-center justify-between rounded-lg border border-line bg-sunken px-3 py-1.5 text-[11.5px]">
                     <span class="truncate text-dim" title={f}>
                       {f}
                     </span>
                     <button
-                      class="rounded p-0.5 text-faint transition hover:bg-white/10 hover:text-ink"
+                      class="rounded p-0.5 text-faint transition hover:bg-fill-3 hover:text-ink"
                       onClick={() => removeFolder(f)}
                       title="remover"
                     >
@@ -215,9 +215,9 @@ export default function AgentCreatorModal(props: Props) {
                     <button
                       class="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-[12px] transition disabled:cursor-not-allowed disabled:opacity-40"
                       classList={{
-                        "border-white/30 bg-white/10 text-ink":
+                        "border-line-strong bg-fill-3 text-ink":
                           cli.available && selectedCliId() === cli.id,
-                        "border-line text-dim hover:border-white/20 hover:text-ink":
+                        "border-line text-dim hover:border-line-strong hover:text-ink":
                           cli.available && selectedCliId() !== cli.id,
                         "border-line text-faint": !cli.available,
                       }}
@@ -248,7 +248,7 @@ export default function AgentCreatorModal(props: Props) {
             memória <span class="text-faint">(opcional — entra no CLAUDE.md)</span>
           </FieldLabel>
           <textarea
-            class="w-full resize-none rounded-lg border border-line bg-black/30 px-3 py-2 text-[12.5px] leading-5 text-ink outline-none transition focus:border-white/25"
+            class="w-full resize-none rounded-lg border border-line bg-sunken px-3 py-2 text-[12.5px] leading-5 text-ink outline-none transition focus:border-line-strong"
             style={{ "font-family": '"Fira Code", ui-monospace, monospace' }}
             rows={5}
             placeholder="o que o agente precisa lembrar: stack, convenções, onde olhar primeiro…"
@@ -273,7 +273,7 @@ export default function AgentCreatorModal(props: Props) {
               </p>
               <div class="mt-2 flex items-center gap-2">
                 <input
-                  class="min-w-0 flex-1 rounded-lg border border-line bg-black/30 px-2.5 py-1.5 text-[12px] text-ink outline-none transition focus:border-alert/50"
+                  class="min-w-0 flex-1 rounded-lg border border-line bg-sunken px-2.5 py-1.5 text-[12px] text-ink outline-none transition focus:border-alert/50"
                   placeholder={editing()?.name}
                   value={confirmDelete()}
                   onInput={(e) => setConfirmDelete(e.currentTarget.value)}
@@ -297,7 +297,7 @@ export default function AgentCreatorModal(props: Props) {
           <div class="mt-1 flex items-center justify-between">
             <span class="text-[10px] text-faint">⌘↵ salvar · esc cancelar</span>
             <button
-              class="rounded-lg bg-white/15 px-3.5 py-1.5 text-[13px] font-medium text-ink transition hover:bg-white/25 disabled:cursor-not-allowed disabled:opacity-40"
+              class="rounded-cx bg-accent px-4 py-1.5 text-[13px] font-medium text-accent-ink shadow-cx transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
               onClick={submit}
               disabled={submitting()}
             >

@@ -154,6 +154,9 @@ impl Store {
         if user_version < 3 {
             Self::migrate_v2_to_v3(&mut conn)?;
         }
+        if user_version < 4 {
+            Self::migrate_v3_to_v4(&mut conn)?;
+        }
         Ok(())
     }
 
@@ -350,13 +353,68 @@ impl Store {
         Ok(())
     }
 
+    /// v3 → v4: explicit `position` on projects and runners so the sidebar
+    /// order is the user's, not a side effect of `created_at` / `last_active`.
+    /// Backfilled from the order those rows were being shown in, so nothing
+    /// visibly jumps on first launch after the upgrade.
+    fn migrate_v3_to_v4(conn: &mut Connection) -> Result<()> {
+        let tx = conn.transaction()?;
+        Self::ensure_column(&tx, "projects", "position", "INTEGER NOT NULL DEFAULT 0")?;
+        Self::ensure_column(&tx, "runners", "position", "INTEGER NOT NULL DEFAULT 0")?;
+
+        let project_ids: Vec<String> = {
+            let mut stmt = tx.prepare("SELECT id FROM projects ORDER BY created_at DESC")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for (i, id) in project_ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE projects SET position = ?1 WHERE id = ?2",
+                params![i as i64, id],
+            )?;
+        }
+
+        let runner_ids: Vec<String> = {
+            let mut stmt =
+                tx.prepare("SELECT id FROM runners ORDER BY project_id, last_active DESC")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for (i, id) in runner_ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE runners SET position = ?1 WHERE id = ?2",
+                params![i as i64, id],
+            )?;
+        }
+
+        tx.execute_batch("PRAGMA user_version = 4")?;
+        tx.commit().context("committing v3→v4 migration")?;
+        Ok(())
+    }
+
+    /// Writes a new order for the given ids. Anything not named keeps its
+    /// slot at the end, so a stale list from the UI can't drop a row.
+    pub fn reorder(&self, table: &str, ids: &[String]) -> Result<()> {
+        if !matches!(table, "projects" | "runners") {
+            anyhow::bail!("reorder: unsupported table {table}");
+        }
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let sql = format!("UPDATE {table} SET position = ?1 WHERE id = ?2");
+        for (i, id) in ids.iter().enumerate() {
+            tx.execute(&sql, params![i as i64, id])?;
+        }
+        tx.commit().context("committing reorder")?;
+        Ok(())
+    }
+
     /* ---------------------------- projects ---------------------------- */
 
     pub fn projects_list(&self) -> Result<Vec<ProjectRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, slug, folders_json, memory, cwd, created_at \
-             FROM projects ORDER BY created_at DESC",
+             FROM projects ORDER BY position ASC, created_at DESC",
         )?;
         let rows = stmt
             .query_map([], |row| {
@@ -420,8 +478,9 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             r#"
-            INSERT INTO projects (id, name, slug, folders_json, memory, cwd, created_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            INSERT INTO projects (id, name, slug, folders_json, memory, cwd, created_at, position)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7,
+                    (SELECT COALESCE(MAX(position), -1) + 1 FROM projects))
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 folders_json = excluded.folders_json,
@@ -452,7 +511,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, project_id, kind, name, program, args_json, env_json, \
                     with_status_fsm, created_at, last_active, session_id \
-             FROM runners ORDER BY last_active DESC",
+             FROM runners ORDER BY position ASC, last_active DESC",
         )?;
         let rows = stmt
             .query_map([], |row| {
@@ -507,8 +566,9 @@ impl Store {
             r#"
             INSERT INTO runners
                 (id, project_id, kind, name, program, args_json, env_json,
-                 with_status_fsm, created_at, last_active, session_id)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                 with_status_fsm, created_at, last_active, session_id, position)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                    (SELECT COALESCE(MAX(position), -1) + 1 FROM runners))
             ON CONFLICT(id) DO UPDATE SET
                 project_id = excluded.project_id,
                 kind = excluded.kind,

@@ -13,7 +13,7 @@ export default function ProjectCard(props: Props) {
   const wide = () => props.project.runners.length > 1;
   return (
     <article
-      class="flex flex-col rounded-lg border border-white/8 bg-float p-3 transition hover:border-white/20"
+      class="flex flex-col rounded-lg border border-line bg-float p-3 transition hover:border-line-strong"
       classList={{ "md:col-span-2": wide() }}
     >
       <header class="mb-3 flex items-center gap-2">
@@ -38,7 +38,7 @@ export default function ProjectCard(props: Props) {
           {(r) => (
             <li>
               <button
-                class="flex w-full items-start gap-2 rounded border border-transparent bg-white/[0.02] px-2 py-1.5 text-left text-[12px] hover:border-white/15 hover:bg-white/[0.05]"
+                class="flex w-full items-start gap-2 rounded border border-transparent bg-fill-1 px-2 py-1.5 text-left text-[12px] hover:border-line-strong hover:bg-fill-1"
                 onClick={() => props.onPick(props.project, r)}
               >
                 <span class="mt-1 shrink-0">

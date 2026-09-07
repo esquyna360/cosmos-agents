@@ -1,6 +1,6 @@
 import { createSignal } from "solid-js";
 
-export type ViewMode = "runners" | "editor" | "diff" | "memory";
+export type ViewMode = "runners" | "editor" | "diff" | "memory" | "browser";
 
 const VIEW_KEY = "cosmos.view";
 const COMPOSER_KEY = "cosmos.composer.visible";
@@ -13,7 +13,14 @@ function readView(): ViewMode {
   // Legacy value "terminal" maps to the new default. Cleanup of the stored
   // key happens in projects.ts::migrateLegacyLocalStorage (v3 stamp).
   if (v === "terminal") return "runners";
-  if (v === "editor" || v === "diff" || v === "memory" || v === "runners") return v;
+  if (
+    v === "editor" ||
+    v === "diff" ||
+    v === "memory" ||
+    v === "browser" ||
+    v === "runners"
+  )
+    return v;
   return "runners";
 }
 
@@ -38,12 +45,16 @@ const [sidebarOpen, setSidebarOpenRaw] = createSignal<boolean>(
   readBool(SIDEBAR_OPEN_KEY, true),
 );
 
+// Settings sheet. Not persisted — it should never be open on launch.
+const [settingsOpen, setSettingsOpenRaw] = createSignal<boolean>(false);
+
 // Toggled from InputBar when the textarea gains/loses focus. App reads it to
 // hide the terminal so the composer can claim the full pane height.
 const [composerExpanded, setComposerExpandedRaw] = createSignal<boolean>(false);
 
 export {
   view,
+  settingsOpen,
   composerVisible,
   workflowOpen,
   sidebarWidthPx,
@@ -61,7 +72,7 @@ export function setView(v: ViewMode): void {
 }
 
 export function cycleView(): void {
-  const order: ViewMode[] = ["runners", "editor", "diff", "memory"];
+  const order: ViewMode[] = ["runners", "editor", "diff", "memory", "browser"];
   const i = order.indexOf(view());
   setView(order[(i + 1) % order.length]);
 }
@@ -97,4 +108,12 @@ export function setSidebarOpen(v: boolean): void {
 
 export function toggleSidebar(): void {
   setSidebarOpen(!sidebarOpen());
+}
+
+export function setSettingsOpen(v: boolean): void {
+  setSettingsOpenRaw(v);
+}
+
+export function toggleSettings(): void {
+  setSettingsOpenRaw((v) => !v);
 }

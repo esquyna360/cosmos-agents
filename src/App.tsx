@@ -26,6 +26,8 @@ import AgentCreatorModal from "./components/AgentCreatorModal";
 import UpdateBanner from "./components/UpdateBanner";
 import RunnerTabs from "./components/RunnerTabs";
 import MemoryView from "./components/MemoryView";
+import Browser from "./components/Browser";
+import SettingsPanel from "./components/SettingsPanel";
 import InlineEdit from "./components/InlineEdit";
 import { colorForPath } from "./lib/colorHash";
 import { creator, openCreator, closeCreator } from "./stores/creator";
@@ -49,10 +51,12 @@ import {
   composerExpanded,
   composerVisible,
   cycleView,
+  settingsOpen,
   setView,
   setWorkflowOpen,
   sidebarOpen,
   toggleComposer,
+  toggleSettings,
   toggleSidebar,
   toggleWorkflow,
   view,
@@ -64,6 +68,8 @@ import {
   setLayout,
   toggleSplit,
 } from "./stores/panes";
+import { cycleTheme, initTheme } from "./stores/theme";
+import { startUpdateWatch } from "./stores/updates";
 import type { AgentStatus } from "./lib/ipc";
 
 export default function App() {
@@ -75,6 +81,8 @@ export default function App() {
   });
 
   onMount(() => {
+    initTheme();
+    startUpdateWatch();
     migrateLegacyLocalStorage();
     loadProjects().catch(console.error);
     attachRunnerStatusListener().catch(console.error);
@@ -143,6 +151,11 @@ export default function App() {
           return;
         }
       }
+      if (e.key === ",") {
+        e.preventDefault();
+        toggleSettings();
+        return;
+      }
       if (key === "b") {
         e.preventDefault();
         toggleSidebar();
@@ -151,6 +164,11 @@ export default function App() {
       if (key === "d") {
         e.preventDefault();
         toggleWorkflow();
+        return;
+      }
+      if (key === "t" && e.shiftKey) {
+        e.preventDefault();
+        cycleTheme();
         return;
       }
       if (key === "t") {
@@ -263,6 +281,9 @@ export default function App() {
                   <Show when={view() === "memory"}>
                     <MemoryView project={p} />
                   </Show>
+                  <Show when={view() === "browser"}>
+                    <Browser projectId={p.id} />
+                  </Show>
                 </>
               )}
             </Show>
@@ -284,6 +305,9 @@ export default function App() {
           </Show>
         </main>
       </div>
+      <Show when={settingsOpen()}>
+        <SettingsPanel />
+      </Show>
       <UpdateBanner />
     </div>
   );
@@ -295,7 +319,7 @@ function ProjectIdentity() {
   return (
     <Show when={p()} keyed>
       {(proj) => (
-        <div data-no-drag class="flex min-w-0 items-center gap-2">
+        <div data-tauri-drag-region="false" class="flex min-w-0 items-center gap-2">
           <span
             class="h-2 w-2 shrink-0 rounded-full"
             style={{
@@ -339,12 +363,12 @@ function ProjectIdentity() {
 function EmptyState() {
   return (
     <div class="flex flex-1 flex-col items-center justify-center gap-4 text-faint">
-      <div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-line bg-white/[0.03]">
+      <div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-line bg-fill-1">
         <Layers size={22} class="text-dim" />
       </div>
       <p class="text-[13px] text-dim">nenhum projeto ainda</p>
       <button
-        class="flex items-center gap-2 rounded-lg border border-line px-3.5 py-2 text-[12.5px] text-ink transition hover:border-white/30 hover:bg-white/6"
+        class="flex items-center gap-2 rounded-lg border border-line px-3.5 py-2 text-[12.5px] text-ink transition hover:border-line-strong hover:bg-fill-2"
         onClick={() => openCreator({ mode: "project" })}
       >
         <Layers size={13} />

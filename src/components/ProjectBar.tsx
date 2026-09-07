@@ -1,5 +1,13 @@
 import { For, Show } from "solid-js";
-import { Diff, FileText, Notebook, Power, Settings2, TerminalSquare } from "lucide-solid";
+import {
+  Diff,
+  FileText,
+  Globe,
+  Notebook,
+  Power,
+  Settings2,
+  TerminalSquare,
+} from "lucide-solid";
 
 import { sleepProject, type ProjectUI } from "../stores/projects";
 import { openCreator } from "../stores/creator";
@@ -15,6 +23,7 @@ const VIEW_PILLS: {
   { id: "editor", label: "editor", icon: FileText, hint: "⌘E cicla" },
   { id: "diff", label: "diff", icon: Diff, hint: "git diff" },
   { id: "memory", label: "memória", icon: Notebook, hint: "cards que entram no CLAUDE.md" },
+  { id: "browser", label: "browser", icon: Globe, hint: "preview do dev server" },
 ];
 
 interface Props {
@@ -27,14 +36,14 @@ export default function ProjectBar(props: Props) {
 
   return (
     <div class="flex shrink-0 items-center gap-2 border-b border-line bg-panel px-2.5 py-1.5">
-      <div class="inline-flex shrink-0 items-center gap-0.5 rounded-lg border border-line bg-white/[0.03] p-0.5">
+      <div class="inline-flex shrink-0 items-center gap-0.5 rounded-lg border border-line bg-fill-1 p-0.5">
         <For each={VIEW_PILLS}>
           {(pill) => {
             const isActive = () => view() === pill.id;
             return (
               <button
-                class="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11.5px] text-faint transition hover:bg-white/6 hover:text-ink"
-                classList={{ "bg-white/12 text-ink": isActive() }}
+                class="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11.5px] text-faint transition hover:bg-fill-2 hover:text-ink"
+                classList={{ "bg-fill-3 text-ink": isActive() }}
                 onClick={() => setView(pill.id)}
                 title={`${pill.label} — ${pill.hint}`}
               >
@@ -57,14 +66,14 @@ export default function ProjectBar(props: Props) {
       </span>
 
       <button
-        class="shrink-0 rounded-md p-1.5 text-faint transition hover:bg-white/8 hover:text-ink"
+        class="shrink-0 rounded-md p-1.5 text-faint transition hover:bg-fill-2 hover:text-ink"
         onClick={() => openCreator({ mode: "project", editingProjectId: p().id })}
         title="editar projeto (pastas, memória, excluir)"
       >
         <Settings2 size={13} />
       </button>
       <button
-        class="shrink-0 rounded-md p-1.5 text-faint transition hover:bg-white/8 hover:text-ink"
+        class="shrink-0 rounded-md p-1.5 text-faint transition hover:bg-fill-2 hover:text-ink"
         onClick={() => sleepProject(p().id).catch(console.error)}
         title="parar todos os runners (⌘⇧W) — nada é apagado"
       >

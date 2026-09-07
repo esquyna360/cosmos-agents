@@ -21,9 +21,11 @@ import {
   type RunnerStatus,
 } from "../lib/projects";
 import {
+  projectsReorder,
   ptyKill,
   ptyLiveIds,
   ptySpawn,
+  runnersReorder,
   type AgentStatus,
 } from "../lib/ipc";
 import { activeSlot, forgetProject, revealRunner, slotsFor } from "./panes";
@@ -218,6 +220,58 @@ export function focusRunner(projectId: string, runnerId: string): void {
   const proj = state.list.find((p) => p.id === projectId);
   const runner = proj?.runners.find((r) => r.id === runnerId);
   if (runner && !runner.live) restartRunner(runnerId).catch(console.error);
+}
+
+/**
+ * Moves `id` so it sits where `beforeId` was, or to the end when `beforeId`
+ * is null. The store is reordered first and persisted after, so the row
+ * follows the cursor instead of waiting on a round trip.
+ */
+export function moveProject(id: string, beforeId: string | null): void {
+  const next = reinsert(
+    state.list.map((p) => p.id),
+    id,
+    beforeId,
+  );
+  if (!next) return;
+  setState("list", (list) => sortByIds(list, next));
+  projectsReorder(next).catch(console.error);
+}
+
+export function moveRunner(
+  projectId: string,
+  id: string,
+  beforeId: string | null,
+): void {
+  const proj = state.list.find((p) => p.id === projectId);
+  if (!proj) return;
+  const next = reinsert(
+    proj.runners.map((r) => r.id),
+    id,
+    beforeId,
+  );
+  if (!next) return;
+  setState("list", (p) => p.id === projectId, "runners", (rs) =>
+    sortByIds(rs, next),
+  );
+  runnersReorder(next).catch(console.error);
+}
+
+function reinsert(ids: string[], id: string, beforeId: string | null): string[] | null {
+  const from = ids.indexOf(id);
+  if (from < 0 || id === beforeId) return null;
+  const rest = ids.filter((x) => x !== id);
+  const at = beforeId === null ? rest.length : rest.indexOf(beforeId);
+  if (beforeId !== null && at < 0) return null;
+  rest.splice(at, 0, id);
+  return rest.every((x, i) => x === ids[i]) ? null : rest;
+}
+
+function sortByIds<T extends { id: string }>(items: readonly T[], order: string[]): T[] {
+  const rank = new Map(order.map((id, i) => [id, i]));
+  return [...items].sort(
+    (a, b) => (rank.get(a.id) ?? 1e9) - (rank.get(b.id) ?? 1e9),
+  );
 }
 
 export function toggleProjectCollapsed(id: string): void {

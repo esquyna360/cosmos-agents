@@ -64,3 +64,12 @@ export function ptyLiveIds(): Promise<string[]> {
 export function debugLog(msg: string): void {
   invoke("debug_log", { msg }).catch(() => {});
 }
+
+/** Persists an explicit order. Ids not listed keep their current slot. */
+export function projectsReorder(ids: string[]): Promise<void> {
+  return invoke("projects_reorder", { ids });
+}
+
+export function runnersReorder(ids: string[]): Promise<void> {
+  return invoke("runners_reorder", { ids });
+}

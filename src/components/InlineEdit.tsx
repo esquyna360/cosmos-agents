@@ -67,7 +67,7 @@ export default function InlineEdit(props: Props) {
         ref={(el) => (inputRef = el)}
         class={
           props.inputClass ??
-          "w-full min-w-0 rounded border border-white/15 bg-black/30 px-1 py-0 text-sm text-white outline-none focus:border-white/35"
+          "w-full min-w-0 rounded border border-line-strong bg-sunken px-1 py-0 text-sm text-ink outline-none focus:border-line-strong"
         }
         value={draft()}
         onInput={(e) => setDraft(e.currentTarget.value)}

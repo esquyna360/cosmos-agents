@@ -14,16 +14,16 @@ import { layout, setLayout, type PaneLayout } from "../stores/panes";
 /**
  * The window's drag strip.
  *
- * Dragging was broken for one reason: the window was configured `transparent`
- * alongside macOS's Overlay title bar, which drops the native titled style
- * mask and with it the OS-level drag. That's fixed in tauri.conf.json. Here we
- * simply mark the strip with `data-tauri-drag-region` and get out of the way —
- * the previous code *also* called `startDragging()` by hand on mousedown, and
- * two drag sessions racing on the same event is its own hang.
+ * Dragging was broken by Tauri 2's ACL, not by anything visual. Tauri injects
+ * a `drag.js` that answers a mousedown on `data-tauri-drag-region` by invoking
+ * `plugin:window|start_dragging` — but `core:window:default` does NOT grant
+ * `allow-start-dragging`, so every one of those invokes was denied in silence.
+ * The permission is now listed explicitly in capabilities/default.json. (The
+ * old code also called `startDragging()` by hand, which failed for the exact
+ * same reason, which is why removing it changed nothing.)
  *
- * Interactive children opt out with `data-no-drag` (Tauri skips any element
- * that isn't the drag region itself, but nested buttons still need pointer
- * events, so keeping them explicit documents the intent).
+ * `deep` means any click inside the strip drags, so there are no dead zones;
+ * interactive clusters opt out with `data-tauri-drag-region="false"`.
  */
 
 const LAYOUT_ICONS: Record<PaneLayout, typeof Square> = {
@@ -50,14 +50,14 @@ interface Props {
 export default function TitleBar(props: Props) {
   return (
     <div
-      data-tauri-drag-region
+      data-tauri-drag-region="deep"
       class="relative z-20 flex h-[var(--titlebar-h)] shrink-0 select-none items-center gap-2 border-b border-line bg-panel pr-2.5"
       style={{ "padding-left": "78px" }}
       title="Cosmos"
     >
       <button
-        data-no-drag
-        class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-faint transition hover:bg-white/8 hover:text-ink"
+        data-tauri-drag-region="false"
+        class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-faint transition hover:bg-fill-2 hover:text-ink"
         classList={{ "text-dim": sidebarOpen() }}
         onClick={toggleSidebar}
         title="mostrar/ocultar projetos (⌘B)"
@@ -65,13 +65,13 @@ export default function TitleBar(props: Props) {
         <PanelLeft size={13} />
       </button>
 
-      <div data-tauri-drag-region class="flex min-w-0 flex-1 items-center gap-2">
+      <div class="flex min-w-0 flex-1 items-center gap-2">
         {props.center}
       </div>
 
       <div
-        data-no-drag
-        class="flex shrink-0 items-center gap-0.5 rounded-lg border border-line bg-white/[0.03] p-0.5"
+        data-tauri-drag-region="false"
+        class="flex shrink-0 items-center gap-0.5 rounded-lg border border-line bg-fill-1 p-0.5"
       >
         <For each={LAYOUT_ORDER}>
           {(item) => {
@@ -79,8 +79,8 @@ export default function TitleBar(props: Props) {
             const active = () => layout() === item.id;
             return (
               <button
-                class="flex h-6 w-7 items-center justify-center rounded-md text-faint transition hover:bg-white/8 hover:text-ink"
-                classList={{ "bg-white/12 text-ink shadow-sm": active() }}
+                class="flex h-6 w-7 items-center justify-center rounded-md text-faint transition hover:bg-fill-2 hover:text-ink"
+                classList={{ "bg-fill-3 text-ink shadow-sm": active() }}
                 onClick={() => setLayout(item.id)}
                 title={item.hint}
               >

@@ -69,6 +69,36 @@ fn url_path(home: &Path) -> PathBuf {
     cosmos_dir(home).join("web-url")
 }
 
+pub fn save_config(home: &Path, cfg: &RemoteConfig) -> Result<()> {
+    std::fs::create_dir_all(cosmos_dir(home))?;
+    std::fs::write(config_path(home), serde_json::to_string_pretty(cfg)?)?;
+    Ok(())
+}
+
+/// Brings the tunnel in line with `cfg` without a restart. The web server
+/// itself is not restartable in place — `enabled` and `port` are read at
+/// launch — so only the tunnel is reconciled here and the UI says as much.
+pub fn apply_tunnel(home: &Path, cfg: &RemoteConfig) {
+    if cfg.enabled && cfg.tunnel {
+        if crate::tunnel::is_running() {
+            return;
+        }
+        let port = cfg.port;
+        let home = home.to_path_buf();
+        let Ok(token) = ensure_token(&home) else { return };
+        crate::tunnel::start(port, move |url| {
+            write_url_file(&home, port, &token, Some(url));
+            let link = format!("{url}/?t={token}");
+            notify(&home, &link);
+        });
+    } else {
+        crate::tunnel::stop();
+        if let Ok(token) = ensure_token(home) {
+            write_url_file(home, cfg.port, &token, None);
+        }
+    }
+}
+
 pub fn load_config(home: &Path) -> RemoteConfig {
     let path = config_path(home);
     match std::fs::read_to_string(&path) {

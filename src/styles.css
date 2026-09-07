@@ -6,33 +6,294 @@
 @tailwind components;
 @tailwind utilities;
 
-/* --------------------------------------------------------------- tokens --
+/* ================================================================ themes ==
 
-   One dark scale plus two signal hues. Surfaces climb in luminance as they
-   climb in depth (void → panel → raised → float), so a popover reads as
-   "closer" without a border doing all the work. */
+   Every surface, line and text colour in the app resolves through a variable
+   defined here. Components never name a raw colour — they use the Tailwind
+   aliases in tailwind.config.js, which point back at these. That is what lets
+   a theme swap be one attribute on <html> instead of a rewrite.
 
-:root {
-  --void: #06070a;
-  --panel: #0a0c11;
-  --raised: #10131a;
-  --float: #171b24;
+   The four `--fill-*` steps are the overlay scale used for hover, selection
+   and inset chrome. In dark themes they are white at rising alpha; in light
+   themes they flip to black. Because components only ever say `bg-fill-2`,
+   the same markup reads correctly in both.
 
-  --line: rgba(255, 255, 255, 0.07);
-  --line-strong: rgba(255, 255, 255, 0.14);
+   `--term-*` mirrors the palette into xterm.js (see lib/theme.ts), so the
+   terminal is never the one surface that ignores the theme. */
 
-  --text: #e9ecf1;
-  --text-dim: #99a1b0;
-  --text-faint: #626b7b;
+:root,
+:root[data-theme="midnight"] {
+  color-scheme: dark;
+
+  --app-bg: radial-gradient(120% 90% at 82% -10%, #141a2e 0%, #0a0b10 58%);
+  --void: #0a0b10;
+  --panel: #0d0f16;
+  --raised: #12151f;
+  --float: #191d29;
+  --sunken: rgba(0, 0, 0, 0.32);
+
+  --fill-1: rgba(255, 255, 255, 0.035);
+  --fill-2: rgba(255, 255, 255, 0.07);
+  --fill-3: rgba(255, 255, 255, 0.12);
+  --fill-4: rgba(255, 255, 255, 0.2);
+
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
+
+  --text: #e8ecf4;
+  --text-dim: #98a1b4;
+  --text-faint: #5f6879;
 
   --accent: #7aa2ff;
-  --accent-soft: rgba(122, 162, 255, 0.14);
+  --accent-soft: rgba(122, 162, 255, 0.16);
+  --accent-ink: #08101f;
   --live: #34d399;
   --busy: #fbbf24;
   --alert: #fb7185;
 
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-2: 0 18px 48px -18px rgba(0, 0, 0, 0.85);
+
+  --term-bg: #0d0f16;
+  --term-fg: #e8ecf4;
+  --term-black: #0d0f16;
+  --term-red: #fb7185;
+  --term-green: #34d399;
+  --term-yellow: #fbbf24;
+  --term-blue: #7aa2ff;
+  --term-magenta: #c4a2ff;
+  --term-cyan: #5eead4;
+  --term-white: #d3d9e4;
+}
+
+:root[data-theme="graphite"] {
+  color-scheme: dark;
+
+  --app-bg: linear-gradient(168deg, #17181a 0%, #0f1011 62%);
+  --void: #101112;
+  --panel: #141618;
+  --raised: #1a1d1f;
+  --float: #212528;
+  --sunken: rgba(0, 0, 0, 0.3);
+
+  --fill-1: rgba(255, 255, 255, 0.04);
+  --fill-2: rgba(255, 255, 255, 0.075);
+  --fill-3: rgba(255, 255, 255, 0.13);
+  --fill-4: rgba(255, 255, 255, 0.21);
+
+  --line: rgba(255, 255, 255, 0.09);
+  --line-strong: rgba(255, 255, 255, 0.17);
+
+  --text: #ecebe8;
+  --text-dim: #a2a09b;
+  --text-faint: #6b6a66;
+
+  --accent: #5eead4;
+  --accent-soft: rgba(94, 234, 212, 0.15);
+  --accent-ink: #06201c;
+  --live: #86efac;
+  --busy: #fcd34d;
+  --alert: #fca5a5;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-2: 0 18px 48px -18px rgba(0, 0, 0, 0.8);
+
+  --term-bg: #141618;
+  --term-fg: #ecebe8;
+  --term-black: #141618;
+  --term-red: #fca5a5;
+  --term-green: #86efac;
+  --term-yellow: #fcd34d;
+  --term-blue: #93c5fd;
+  --term-magenta: #d8b4fe;
+  --term-cyan: #5eead4;
+  --term-white: #d6d4cf;
+}
+
+:root[data-theme="obsidian"] {
+  color-scheme: dark;
+
+  --app-bg: #000000;
+  --void: #000000;
+  --panel: #050506;
+  --raised: #0b0b0d;
+  --float: #131316;
+  --sunken: rgba(0, 0, 0, 0.5);
+
+  --fill-1: rgba(255, 255, 255, 0.04);
+  --fill-2: rgba(255, 255, 255, 0.08);
+  --fill-3: rgba(255, 255, 255, 0.14);
+  --fill-4: rgba(255, 255, 255, 0.22);
+
+  --line: rgba(255, 255, 255, 0.1);
+  --line-strong: rgba(255, 255, 255, 0.2);
+
+  --text: #f4f4f6;
+  --text-dim: #9c9ca8;
+  --text-faint: #63636e;
+
+  --accent: #c4a2ff;
+  --accent-soft: rgba(196, 162, 255, 0.16);
+  --accent-ink: #17092c;
+  --live: #4ade80;
+  --busy: #facc15;
+  --alert: #f87171;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.7);
+  --shadow-2: 0 18px 48px -18px rgba(0, 0, 0, 1);
+
+  --term-bg: #050506;
+  --term-fg: #f4f4f6;
+  --term-black: #050506;
+  --term-red: #f87171;
+  --term-green: #4ade80;
+  --term-yellow: #facc15;
+  --term-blue: #93b4ff;
+  --term-magenta: #c4a2ff;
+  --term-cyan: #67e8f9;
+  --term-white: #dcdce2;
+}
+
+:root[data-theme="ember"] {
+  color-scheme: dark;
+
+  --app-bg: radial-gradient(120% 90% at 15% -15%, #2a1e16 0%, #14100e 60%);
+  --void: #14100e;
+  --panel: #191411;
+  --raised: #201a16;
+  --float: #2a221d;
+  --sunken: rgba(0, 0, 0, 0.32);
+
+  --fill-1: rgba(255, 236, 220, 0.04);
+  --fill-2: rgba(255, 236, 220, 0.08);
+  --fill-3: rgba(255, 236, 220, 0.13);
+  --fill-4: rgba(255, 236, 220, 0.21);
+
+  --line: rgba(255, 232, 214, 0.1);
+  --line-strong: rgba(255, 232, 214, 0.19);
+
+  --text: #f3e9e1;
+  --text-dim: #b09c8e;
+  --text-faint: #776557;
+
+  --accent: #f0a868;
+  --accent-soft: rgba(240, 168, 104, 0.16);
+  --accent-ink: #241206;
+  --live: #a3d977;
+  --busy: #f5c451;
+  --alert: #ef8354;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-2: 0 18px 48px -18px rgba(0, 0, 0, 0.85);
+
+  --term-bg: #191411;
+  --term-fg: #f3e9e1;
+  --term-black: #191411;
+  --term-red: #ef8354;
+  --term-green: #a3d977;
+  --term-yellow: #f5c451;
+  --term-blue: #8fb8de;
+  --term-magenta: #d8a0c8;
+  --term-cyan: #7fcfc4;
+  --term-white: #ded1c6;
+}
+
+/* ------------------------------------------------------------ light ---- */
+
+:root[data-theme="dawn"] {
+  color-scheme: light;
+
+  --app-bg: linear-gradient(155deg, #fdf6ef 0%, #fbeadd 45%, #f8ded2 100%);
+  --void: transparent;
+  --panel: rgba(255, 255, 255, 0.72);
+  --raised: rgba(255, 255, 255, 0.86);
+  --float: #ffffff;
+  --sunken: rgba(60, 40, 30, 0.05);
+
+  --fill-1: rgba(60, 40, 30, 0.035);
+  --fill-2: rgba(60, 40, 30, 0.065);
+  --fill-3: rgba(60, 40, 30, 0.1);
+  --fill-4: rgba(60, 40, 30, 0.16);
+
+  --line: rgba(60, 40, 30, 0.1);
+  --line-strong: rgba(60, 40, 30, 0.2);
+
+  --text: #23201d;
+  --text-dim: #6d635b;
+  --text-faint: #9c9089;
+
+  --accent: #c2410c;
+  --accent-soft: rgba(194, 65, 12, 0.11);
+  --accent-ink: #fff6f0;
+  --live: #15803d;
+  --busy: #b45309;
+  --alert: #be123c;
+
+  --shadow-1: 0 1px 2px rgba(90, 60, 40, 0.07);
+  --shadow-2: 0 20px 46px -22px rgba(90, 60, 40, 0.3);
+
+  --term-bg: #fffaf5;
+  --term-fg: #2b2622;
+  --term-black: #2b2622;
+  --term-red: #be123c;
+  --term-green: #15803d;
+  --term-yellow: #b45309;
+  --term-blue: #1d4ed8;
+  --term-magenta: #a21caf;
+  --term-cyan: #0e7490;
+  --term-white: #6d635b;
+}
+
+:root[data-theme="paper"] {
+  color-scheme: light;
+
+  --app-bg: linear-gradient(180deg, #f8f9fb 0%, #eef1f5 100%);
+  --void: transparent;
+  --panel: rgba(255, 255, 255, 0.76);
+  --raised: rgba(255, 255, 255, 0.9);
+  --float: #ffffff;
+  --sunken: rgba(20, 30, 50, 0.05);
+
+  --fill-1: rgba(20, 30, 50, 0.035);
+  --fill-2: rgba(20, 30, 50, 0.065);
+  --fill-3: rgba(20, 30, 50, 0.1);
+  --fill-4: rgba(20, 30, 50, 0.16);
+
+  --line: rgba(20, 30, 50, 0.1);
+  --line-strong: rgba(20, 30, 50, 0.2);
+
+  --text: #171c26;
+  --text-dim: #5d6675;
+  --text-faint: #8d95a3;
+
+  --accent: #2563eb;
+  --accent-soft: rgba(37, 99, 235, 0.11);
+  --accent-ink: #f5f9ff;
+  --live: #15803d;
+  --busy: #b45309;
+  --alert: #be123c;
+
+  --shadow-1: 0 1px 2px rgba(20, 30, 50, 0.07);
+  --shadow-2: 0 20px 46px -22px rgba(20, 30, 50, 0.28);
+
+  --term-bg: #ffffff;
+  --term-fg: #1b202a;
+  --term-black: #1b202a;
+  --term-red: #be123c;
+  --term-green: #15803d;
+  --term-yellow: #b45309;
+  --term-blue: #2563eb;
+  --term-magenta: #9333ea;
+  --term-cyan: #0e7490;
+  --term-white: #5d6675;
+}
+
+/* ================================================================ base == */
+
+:root {
   --radius: 10px;
-  --titlebar-h: 38px;
+  --radius-lg: 14px;
+  --titlebar-h: 40px;
 }
 
 html,
@@ -41,10 +302,15 @@ body,
   height: 100%;
   margin: 0;
   color: var(--text);
-  background: var(--void);
+}
+
+html {
+  background: var(--app-bg);
+  background-attachment: fixed;
 }
 
 body {
+  background: transparent;
   font-family:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
     "Helvetica Neue", sans-serif;
@@ -53,27 +319,32 @@ body {
   overscroll-behavior: none;
 }
 
-::selection {
-  background: rgba(122, 162, 255, 0.3);
+/* The shell paints nothing of its own so the themed page gradient shows
+   through every surface that opts into translucency. */
+#root {
+  background: transparent;
 }
 
-/* Scrollbars: present enough to grab, quiet enough to ignore. */
+::selection {
+  background: var(--accent-soft);
+}
+
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+  scrollbar-color: var(--fill-4) transparent;
 }
 *::-webkit-scrollbar {
   width: 9px;
   height: 9px;
 }
 *::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.13);
+  background: var(--fill-3);
   border-radius: 99px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.24);
+  background: var(--fill-4);
   background-clip: padding-box;
 }
 *::-webkit-scrollbar-corner {
@@ -87,17 +358,31 @@ body {
   padding: 2px 0;
 }
 
-/* ------------------------------------------------------------ primitives */
+/* ============================================================ primitives */
 
 .cx-focus-ring {
   box-shadow:
-    inset 0 0 0 1px rgba(122, 162, 255, 0.55),
-    0 0 0 1px rgba(122, 162, 255, 0.16),
-    0 10px 32px -12px rgba(122, 162, 255, 0.4);
+    inset 0 0 0 1px var(--accent),
+    0 0 0 3px var(--accent-soft);
 }
 
-/* Pane entering/leaving the grid — a fade rather than a snap, so a layout
-   change reads as one motion instead of four independent pops. */
+/* Frosted surface used by popovers, the command palette and the settings
+   sheet. Backdrop blur is what keeps the light themes from looking like flat
+   paper stacked on flat paper. */
+.cx-glass {
+  background: var(--float);
+  backdrop-filter: saturate(1.6) blur(20px);
+  -webkit-backdrop-filter: saturate(1.6) blur(20px);
+  box-shadow: var(--shadow-2);
+}
+
+.cx-card {
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+}
+
 @keyframes cx-pane-in {
   from {
     opacity: 0;
@@ -139,13 +424,24 @@ body {
   animation: cx-sheet-in 0.13s ease-out;
 }
 
-/* --------------------------------------------------------------- prose -- */
+/* Row being dragged to a new position, and the gap it will land in. */
+.cx-dragging {
+  opacity: 0.4;
+}
+.cx-drop-before {
+  box-shadow: inset 0 2px 0 -0.5px var(--accent);
+}
+.cx-drop-after {
+  box-shadow: inset 0 -2px 0 -0.5px var(--accent);
+}
+
+/* =============================================================== prose == */
 
 .cosmos-prose h1,
 .cosmos-prose h2,
 .cosmos-prose h3 {
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.95);
+  color: var(--text);
   margin: 1.2em 0 0.4em;
   line-height: 1.25;
 }
@@ -157,26 +453,23 @@ body {
 }
 .cosmos-prose h3 {
   font-size: 1em;
-  color: rgba(255, 255, 255, 0.78);
+  color: var(--text-dim);
 }
 .cosmos-prose p {
   margin: 0.5em 0;
 }
 .cosmos-prose strong {
-  color: rgba(255, 255, 255, 0.97);
+  color: var(--text);
   font-weight: 600;
 }
 .cosmos-prose em {
-  color: rgba(255, 255, 255, 0.78);
+  color: var(--text-dim);
   font-style: italic;
 }
 .cosmos-prose a {
   color: var(--accent);
   text-decoration: underline;
   text-underline-offset: 2px;
-}
-.cosmos-prose a:hover {
-  color: #a9c3ff;
 }
 .cosmos-prose ul,
 .cosmos-prose ol {
@@ -189,13 +482,13 @@ body {
 .cosmos-prose code {
   font-family: "Fira Code", ui-monospace, monospace;
   font-size: 0.9em;
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--fill-2);
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 0.05em 0.35em;
 }
 .cosmos-prose pre {
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--sunken);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 0.7em 0.9em;
@@ -229,5 +522,5 @@ body {
   font-size: 0.95em;
 }
 .cosmos-prose th {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--fill-1);
 }

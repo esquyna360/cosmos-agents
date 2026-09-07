@@ -126,7 +126,7 @@ export default function InputBar(props: Props) {
         <span>↵ nova linha · ⌘↵ enviar · esc encolher</span>
       </div>
       <div
-        class="flex min-h-0 items-end gap-2 rounded-cx border border-line bg-void px-3 py-2 transition focus-within:border-white/25"
+        class="flex min-h-0 items-end gap-2 rounded-cx border border-line bg-void px-3 py-2 transition focus-within:border-line-strong"
         classList={{
           "flex-1": expanded(),
         }}
@@ -160,7 +160,7 @@ export default function InputBar(props: Props) {
         <button
           onClick={submit}
           disabled={!value() || sending()}
-          class="shrink-0 self-end rounded-lg bg-white/10 px-3 py-1.5 text-[12px] font-medium text-ink transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-30"
+          class="shrink-0 self-end rounded-lg bg-fill-3 px-3 py-1.5 text-[12px] font-medium text-ink transition hover:bg-fill-4 disabled:cursor-not-allowed disabled:opacity-30"
           title="Enviar (⌘↵)"
           // Prevent the button from stealing focus before the click resolves,
           // which would otherwise collapse the composer mid-submit.

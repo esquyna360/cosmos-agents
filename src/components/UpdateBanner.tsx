@@ -1,116 +1,125 @@
-import { createSignal, onMount, Show } from "solid-js";
-import { check, type Update } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
+import { Show } from "solid-js";
 import { Download, X } from "lucide-solid";
 
-type Phase = "idle" | "available" | "downloading" | "installed" | "error";
+import {
+  autoInstall,
+  available,
+  dismissed,
+  error,
+  install,
+  phase,
+  progress,
+  setDismissed,
+  skipVersion,
+  total,
+} from "../stores/updates";
+import { projectsStore } from "../stores/projects";
 
+/**
+ * Surfaces a pending update. The check itself lives in stores/updates.ts and
+ * runs on a timer whether or not this ever renders.
+ */
 export default function UpdateBanner() {
-  const [phase, setPhase] = createSignal<Phase>("idle");
-  const [update, setUpdate] = createSignal<Update | null>(null);
-  const [progress, setProgress] = createSignal(0);
-  const [total, setTotal] = createSignal(0);
-  const [error, setError] = createSignal<string | null>(null);
-  const [dismissed, setDismissed] = createSignal(false);
+  const liveCount = () =>
+    projectsStore.list.reduce(
+      (n, p) => n + p.runners.filter((r) => r.live).length,
+      0,
+    );
 
-  onMount(async () => {
-    try {
-      const u = await check();
-      if (u) {
-        setUpdate(u);
-        setPhase("available");
-      }
-    } catch (e) {
-      // Silent: no network, no release yet, etc. Banner just doesn't show.
-      console.warn("[updater] check failed", e);
-    }
-  });
+  const visible = () =>
+    !dismissed() &&
+    (phase() === "available" ||
+      phase() === "downloading" ||
+      phase() === "installing" ||
+      phase() === "error");
 
-  async function apply() {
-    const u = update();
-    if (!u) return;
-    setPhase("downloading");
-    setError(null);
-    setProgress(0);
-    try {
-      await u.downloadAndInstall((evt) => {
-        if (evt.event === "Started") {
-          setTotal(evt.data.contentLength ?? 0);
-        } else if (evt.event === "Progress") {
-          setProgress((p) => p + evt.data.chunkLength);
-        }
-      });
-      setPhase("installed");
-      await relaunch();
-    } catch (e) {
-      setError(String(e));
-      setPhase("error");
-    }
-  }
+  const pct = () =>
+    total() > 0 ? Math.min(100, (progress() / total()) * 100) : null;
 
   return (
-    <Show when={!dismissed() && phase() !== "idle" && update()}>
+    <Show when={visible()}>
       <div
-        class="pointer-events-auto fixed bottom-4 right-4 z-50 flex w-80 flex-col gap-2 rounded-lg border border-line bg-[#13161b]/95 p-3 text-xs text-ink shadow-xl backdrop-blur"
-        data-no-drag
+        data-tauri-drag-region="false"
+        class="cx-glass cx-sheet pointer-events-auto fixed bottom-4 right-4 z-50 flex w-[22rem] flex-col gap-2.5 rounded-cx-lg border border-line p-3.5 text-ink"
       >
         <div class="flex items-center justify-between">
-          <span class="text-[10px] font-semibold uppercase tracking-wider text-faint">
-            Cosmos update
+          <span class="text-[10px] font-semibold uppercase tracking-[0.14em] text-faint">
+            atualização do Cosmos
           </span>
           <button
-            class="text-faint hover:text-ink"
+            class="rounded p-0.5 text-faint transition hover:bg-fill-2 hover:text-ink"
             onClick={() => setDismissed(true)}
-            title="dismiss"
+            title="fechar"
           >
             <X size={12} />
           </button>
         </div>
 
         <Show when={phase() === "available"}>
-          <div class="text-dim">
-            Versão <b>{update()?.version}</b> disponível.
+          <div class="text-[12.5px] text-dim">
+            Versão <b class="text-ink">{available()?.version}</b> disponível.
           </div>
-          <Show when={update()?.body}>
-            <pre class="max-h-24 overflow-auto whitespace-pre-wrap rounded bg-black/30 p-2 text-[10px] text-dim">
-              {update()?.body}
+
+          <Show when={available()?.body}>
+            <pre class="max-h-24 overflow-auto whitespace-pre-wrap rounded-cx bg-sunken p-2 font-mono text-[10.5px] leading-relaxed text-dim">
+              {available()?.body}
             </pre>
           </Show>
-          <button
-            class="flex items-center justify-center gap-2 rounded bg-white/10 px-3 py-1.5 text-[11px] font-medium hover:bg-white/20"
-            onClick={apply}
-          >
-            <Download size={12} />
-            Atualizar e reiniciar
-          </button>
+
+          <Show when={liveCount() > 0}>
+            <p class="text-[11px] leading-relaxed text-faint">
+              {liveCount()} runner{liveCount() === 1 ? "" : "s"} rodando.
+              Atualizar reinicia o app e encerra {liveCount() === 1 ? "ele" : "todos"} —
+              as sessões voltam ao reabrir.
+              <Show when={autoInstall()}>
+                {" "}
+                Por isso a instalação automática esperou.
+              </Show>
+            </p>
+          </Show>
+
+          <div class="flex gap-1.5">
+            <button
+              class="flex flex-1 items-center justify-center gap-1.5 rounded-cx bg-accent px-3 py-1.5 text-[11.5px] font-medium text-accent-ink transition hover:opacity-90"
+              onClick={() => install()}
+            >
+              <Download size={12} />
+              atualizar e reiniciar
+            </button>
+            <button
+              class="rounded-cx border border-line px-2.5 py-1.5 text-[11.5px] text-dim transition hover:border-line-strong hover:text-ink"
+              onClick={skipVersion}
+              title="não avisar mais sobre esta versão"
+            >
+              pular
+            </button>
+          </div>
         </Show>
 
         <Show when={phase() === "downloading"}>
-          <div class="text-dim">Baixando v{update()?.version}…</div>
-          <div class="h-1.5 overflow-hidden rounded bg-white/10">
+          <div class="text-[12.5px] text-dim">
+            Baixando v{available()?.version}
+            {pct() !== null ? ` — ${Math.round(pct()!)}%` : "…"}
+          </div>
+          <div class="h-1 overflow-hidden rounded-full bg-fill-2">
             <div
-              class="h-full bg-white/60 transition-[width]"
-              style={{
-                width:
-                  total() > 0
-                    ? `${Math.min(100, (progress() / total()) * 100)}%`
-                    : "30%",
-              }}
+              class="h-full bg-accent transition-[width]"
+              style={{ width: pct() !== null ? `${pct()}%` : "35%" }}
             />
           </div>
         </Show>
 
-        <Show when={phase() === "installed"}>
-          <div class="text-dim">Instalado. Reiniciando…</div>
+        <Show when={phase() === "installing"}>
+          <div class="text-[12.5px] text-dim">Instalado. Reiniciando…</div>
         </Show>
 
         <Show when={phase() === "error"}>
-          <div class="text-red-300">{error()}</div>
+          <div class="text-[12px] text-alert">{error()}</div>
           <button
-            class="rounded bg-white/10 px-3 py-1.5 text-[11px] hover:bg-white/20"
-            onClick={apply}
+            class="rounded-cx bg-fill-2 px-3 py-1.5 text-[11.5px] transition hover:bg-fill-3"
+            onClick={() => install()}
           >
-            Tentar novamente
+            tentar de novo
           </button>
         </Show>
       </div>

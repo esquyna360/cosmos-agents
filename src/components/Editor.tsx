@@ -1,9 +1,51 @@
-import { batch, createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
+import {
+  batch,
+  createEffect,
+  createSignal,
+  on,
+  onCleanup,
+  onMount,
+  Show,
+} from "solid-js";
 import { EditorState, type Extension } from "@codemirror/state";
-import { EditorView, type ViewUpdate, keymap, lineNumbers, highlightActiveLine } from "@codemirror/view";
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { bracketMatching, indentOnInput } from "@codemirror/language";
-import { oneDark } from "@codemirror/theme-one-dark";
+import {
+  crosshairCursor,
+  drawSelection,
+  dropCursor,
+  EditorView,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+  keymap,
+  lineNumbers,
+  rectangularSelection,
+  type ViewUpdate,
+} from "@codemirror/view";
+import {
+  defaultKeymap,
+  history,
+  historyKeymap,
+  indentWithTab,
+} from "@codemirror/commands";
+import {
+  bracketMatching,
+  foldGutter,
+  foldKeymap,
+  indentOnInput,
+  indentUnit,
+} from "@codemirror/language";
+import {
+  autocompletion,
+  closeBrackets,
+  closeBracketsKeymap,
+  completionKeymap,
+} from "@codemirror/autocomplete";
+import {
+  highlightSelectionMatches,
+  openSearchPanel,
+  search,
+  searchKeymap,
+} from "@codemirror/search";
+import { indentationMarkers } from "@replit/codemirror-indentation-markers";
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
 import { rust } from "@codemirror/lang-rust";
@@ -11,10 +53,20 @@ import { markdown } from "@codemirror/lang-markdown";
 import { html } from "@codemirror/lang-html";
 import { css } from "@codemirror/lang-css";
 import { python } from "@codemirror/lang-python";
+import { yaml } from "@codemirror/lang-yaml";
+import { sql } from "@codemirror/lang-sql";
+import { xml } from "@codemirror/lang-xml";
+import { go } from "@codemirror/lang-go";
+import { java } from "@codemirror/lang-java";
+import { cpp } from "@codemirror/lang-cpp";
+import { php } from "@codemirror/lang-php";
+import { ChevronRight, Search as SearchIcon } from "lucide-solid";
 
 import FileTree from "./FileTree";
 import EditorTabs from "./EditorTabs";
 import { fsReadFile, fsWriteFile } from "../lib/fs";
+import { cosmosEditorTheme } from "../lib/cmTheme";
+import { themeTick } from "../stores/theme";
 import {
   deleteFileState,
   editorOpenRequest,
@@ -50,6 +102,13 @@ function getTimers(projectId: string): Map<string, ReturnType<typeof setTimeout>
   return m;
 }
 
+interface Cursor {
+  line: number;
+  col: number;
+  ranges: number;
+  selected: number;
+}
+
 export default function Editor(props: Props) {
   const projectId = () => focusedProjectId() ?? "";
   // Slice the store-backed editor state for this project. Two reads per
@@ -60,6 +119,12 @@ export default function Editor(props: Props) {
   const dirty = () => focusedProject()?.editor.dirty ?? {};
 
   const [saving, setSaving] = createSignal<Record<string, boolean>>({});
+  const [cursor, setCursor] = createSignal<Cursor>({
+    line: 1,
+    col: 1,
+    ranges: 1,
+    selected: 0,
+  });
 
   let view: EditorView | undefined;
   let host!: HTMLDivElement;
@@ -101,33 +166,81 @@ export default function Editor(props: Props) {
     );
   }
 
-  function buildState(doc: string, path: string): EditorState {
+  /** ⌘S — the file already autosaves, but muscle memory deserves an answer. */
+  function saveNow(): boolean {
+    const pid = projectId();
+    const path = activePath();
+    if (!pid || !path) return false;
+    if (view) setFileState(pid, path, view.state);
+    const t = getTimers(pid).get(path);
+    if (t) clearTimeout(t);
+    flush(path);
+    return true;
+  }
+
+  function readCursor(state: EditorState): Cursor {
+    const sel = state.selection;
+    const head = sel.main.head;
+    const line = state.doc.lineAt(head);
+    let selected = 0;
+    for (const r of sel.ranges) selected += r.to - r.from;
+    return {
+      line: line.number,
+      col: head - line.from + 1,
+      ranges: sel.ranges.length,
+      selected,
+    };
+  }
+
+  function buildState(doc: string, path: string, at?: number): EditorState {
     const pid = projectId();
     const exts: Extension[] = [
       lineNumbers(),
       highlightActiveLine(),
+      highlightActiveLineGutter(),
+      foldGutter(),
       history(),
+      drawSelection(),
+      dropCursor(),
+      rectangularSelection(),
+      crosshairCursor(),
+      EditorState.allowMultipleSelections.of(true),
       bracketMatching(),
+      closeBrackets(),
       indentOnInput(),
-      keymap.of([...defaultKeymap, ...historyKeymap]),
-      oneDark,
+      indentUnit.of("  "),
+      indentationMarkers({ hideFirstIndent: true, highlightActiveBlock: true }),
+      autocompletion({ activateOnTyping: true, closeOnBlur: true }),
+      search({ top: true }),
+      highlightSelectionMatches(),
+      keymap.of([
+        { key: "Mod-s", run: saveNow, preventDefault: true },
+        ...closeBracketsKeymap,
+        ...searchKeymap,
+        ...foldKeymap,
+        ...completionKeymap,
+        ...historyKeymap,
+        ...defaultKeymap,
+        indentWithTab,
+      ]),
+      cosmosEditorTheme(),
       EditorView.lineWrapping,
-      EditorView.theme({
-        "&": { height: "100%", fontSize: "13px", backgroundColor: "transparent" },
-        ".cm-scroller": { fontFamily: '"Fira Code", ui-monospace, monospace' },
-        ".cm-content": { padding: "8px 0" },
-        ".cm-gutters": { backgroundColor: "transparent", border: "none" },
-      }),
       EditorView.updateListener.of((u: ViewUpdate) => {
         if (u.docChanged) {
           setFileState(pid, path, u.state);
           scheduleSave(path);
         }
+        if (u.docChanged || u.selectionSet) setCursor(readCursor(u.state));
       }),
     ];
     const lang = languageFor(path);
     if (lang) exts.push(lang);
-    return EditorState.create({ doc, extensions: exts });
+    const anchor = at === undefined ? undefined : Math.min(at, doc.length);
+    return EditorState.create({
+      doc,
+      extensions: exts,
+      selection: anchor === undefined ? undefined : { anchor },
+    });
   }
 
   async function ensureLoaded(path: string) {
@@ -170,6 +283,7 @@ export default function Editor(props: Props) {
     const state = getFileState<EditorState>(pid, path);
     if (state && view) {
       view.setState(state);
+      setCursor(readCursor(state));
       view.focus();
     }
   }
@@ -222,6 +336,31 @@ export default function Editor(props: Props) {
     });
   });
 
+  // CodeMirror bakes its colours in at extension-build time, so a theme swap
+  // means rebuilding every cached state. Cheap: they are already in memory,
+  // and the caret position survives.
+  createEffect(
+    on(
+      themeTick,
+      () => {
+        const pid = projectId();
+        if (!pid) return;
+        const cur = activePath();
+        if (cur && view) setFileState(pid, cur, view.state);
+        for (const path of openPaths()) {
+          const s = getFileState<EditorState>(pid, path);
+          if (!s) continue;
+          setFileState(pid, path, buildState(s.doc.toString(), path, s.selection.main.head));
+        }
+        if (cur && view) {
+          const s = getFileState<EditorState>(pid, cur);
+          if (s) view.setState(s);
+        }
+      },
+      { defer: true },
+    ),
+  );
+
   onMount(() => {
     view = new EditorView({
       state: EditorState.create({ doc: "", extensions: [EditorState.readOnly.of(true)] }),
@@ -239,6 +378,7 @@ export default function Editor(props: Props) {
         const s = getFileState<EditorState>(pid, persistedActive);
         if (s && view) {
           view.setState(s);
+          setCursor(readCursor(s));
         }
       });
     }
@@ -259,12 +399,20 @@ export default function Editor(props: Props) {
     view = undefined;
   });
 
+  const crumbs = () => {
+    const path = activePath();
+    if (!path) return [];
+    const root = props.roots.find((r) => path.startsWith(r));
+    const rel = root ? path.slice(root.length).replace(/^\/+/, "") : path;
+    return rel.split("/").filter(Boolean);
+  };
+
   return (
     <div class="flex h-full w-full">
-      <div class="flex w-64 shrink-0 flex-col overflow-hidden border-r border-line bg-void">
-        <div class="flex items-center justify-between px-3 pb-2 pt-2 text-[11px] uppercase tracking-wider text-faint">
-          <span>files</span>
-          <span class="normal-case text-faint">⌘P · ⌘⇧F</span>
+      <div class="flex w-60 shrink-0 flex-col overflow-hidden border-r border-line bg-panel">
+        <div class="flex items-center justify-between px-3 pb-1.5 pt-2 text-[9.5px] font-semibold uppercase tracking-[0.16em] text-faint">
+          <span>arquivos</span>
+          <span class="tracking-normal">⌘P · ⌘⇧F</span>
         </div>
         <div class="min-h-0 flex-1 overflow-y-auto">
           <FileTree
@@ -274,7 +422,8 @@ export default function Editor(props: Props) {
           />
         </div>
       </div>
-      <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+
+      <div class="flex min-h-0 min-w-0 flex-1 flex-col bg-void">
         <EditorTabs
           paths={openPaths()}
           active={activePath()}
@@ -282,53 +431,125 @@ export default function Editor(props: Props) {
           onSelect={openFile}
           onClose={closeFile}
         />
+
         <Show
           when={activePath()}
           fallback={
-            <div class="flex flex-1 items-center justify-center text-faint">
-              select a file from the tree or ⌘P
+            <div class="flex flex-1 flex-col items-center justify-center gap-2 text-faint">
+              <p class="text-[12.5px] text-dim">nenhum arquivo aberto</p>
+              <p class="text-[11px]">⌘P por nome · ⌘⇧F por conteúdo</p>
             </div>
           }
         >
-          <div class="flex h-5 shrink-0 items-center justify-end gap-2 px-3 text-[10px] text-faint">
-            <Show when={dirty()[activePath()!]}>
-              <span>{saving()[activePath()!] ? "saving…" : "modified"}</span>
-            </Show>
+          <div class="flex h-[26px] shrink-0 items-center gap-1 border-b border-line px-3 text-[10.5px] text-faint">
+            {crumbs().map((c, i) => (
+              <>
+                <Show when={i > 0}>
+                  <ChevronRight size={9} class="shrink-0 opacity-60" />
+                </Show>
+                <span
+                  class="truncate"
+                  classList={{ "text-dim": i === crumbs().length - 1 }}
+                >
+                  {c}
+                </span>
+              </>
+            ))}
+            <button
+              class="ml-auto flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 transition hover:bg-fill-2 hover:text-ink"
+              onClick={() => view && openSearchPanel(view)}
+              title="buscar no arquivo (⌘F)"
+            >
+              <SearchIcon size={10} />
+              ⌘F
+            </button>
           </div>
         </Show>
-        <div ref={host} class="min-h-0 flex-1 overflow-hidden bg-void" />
+
+        <div ref={host} class="min-h-0 flex-1 overflow-hidden" />
+
+        <Show when={activePath()}>
+          <div class="flex h-[22px] shrink-0 items-center gap-3 border-t border-line bg-panel px-3 text-[10.5px] tabular-nums text-faint">
+            <span>
+              Ln {cursor().line}, Col {cursor().col}
+            </span>
+            <Show when={cursor().selected > 0}>
+              <span>
+                {cursor().selected} sel
+                {cursor().ranges > 1 ? ` · ${cursor().ranges} cursores` : ""}
+              </span>
+            </Show>
+            <span class="ml-auto">2 espaços</span>
+            <span>{languageLabel(activePath()!)}</span>
+            <span
+              classList={{
+                "text-busy": !!dirty()[activePath()!],
+                "text-live": !dirty()[activePath()!],
+              }}
+            >
+              {saving()[activePath()!]
+                ? "salvando…"
+                : dirty()[activePath()!]
+                  ? "modificado"
+                  : "salvo"}
+            </span>
+          </div>
+        </Show>
       </div>
     </div>
   );
 }
 
+const LANGUAGES: Record<string, { label: string; ext: () => Extension }> = {
+  ts: { label: "TypeScript", ext: () => javascript({ jsx: true, typescript: true }) },
+  tsx: { label: "TSX", ext: () => javascript({ jsx: true, typescript: true }) },
+  mts: { label: "TypeScript", ext: () => javascript({ typescript: true }) },
+  cts: { label: "TypeScript", ext: () => javascript({ typescript: true }) },
+  js: { label: "JavaScript", ext: () => javascript({ jsx: true }) },
+  jsx: { label: "JSX", ext: () => javascript({ jsx: true }) },
+  mjs: { label: "JavaScript", ext: () => javascript() },
+  cjs: { label: "JavaScript", ext: () => javascript() },
+  json: { label: "JSON", ext: () => json() },
+  jsonc: { label: "JSON", ext: () => json() },
+  rs: { label: "Rust", ext: () => rust() },
+  md: { label: "Markdown", ext: () => markdown() },
+  markdown: { label: "Markdown", ext: () => markdown() },
+  mdx: { label: "MDX", ext: () => markdown() },
+  html: { label: "HTML", ext: () => html() },
+  htm: { label: "HTML", ext: () => html() },
+  vue: { label: "Vue", ext: () => html() },
+  svelte: { label: "Svelte", ext: () => html() },
+  css: { label: "CSS", ext: () => css() },
+  scss: { label: "SCSS", ext: () => css() },
+  less: { label: "Less", ext: () => css() },
+  py: { label: "Python", ext: () => python() },
+  yaml: { label: "YAML", ext: () => yaml() },
+  yml: { label: "YAML", ext: () => yaml() },
+  sql: { label: "SQL", ext: () => sql() },
+  xml: { label: "XML", ext: () => xml() },
+  svg: { label: "SVG", ext: () => xml() },
+  plist: { label: "XML", ext: () => xml() },
+  go: { label: "Go", ext: () => go() },
+  java: { label: "Java", ext: () => java() },
+  kt: { label: "Kotlin", ext: () => java() },
+  c: { label: "C", ext: () => cpp() },
+  h: { label: "C", ext: () => cpp() },
+  cc: { label: "C++", ext: () => cpp() },
+  cpp: { label: "C++", ext: () => cpp() },
+  hpp: { label: "C++", ext: () => cpp() },
+  m: { label: "Obj-C", ext: () => cpp() },
+  php: { label: "PHP", ext: () => php() },
+  dart: { label: "Dart", ext: () => java() },
+};
+
+function extOf(path: string): string {
+  return path.split("/").pop()?.split(".").slice(1).pop()?.toLowerCase() ?? "";
+}
+
 function languageFor(path: string): Extension | null {
-  const ext = path.split(".").pop()?.toLowerCase() ?? "";
-  switch (ext) {
-    case "ts":
-    case "tsx":
-      return javascript({ jsx: true, typescript: true });
-    case "js":
-    case "jsx":
-    case "mjs":
-    case "cjs":
-      return javascript({ jsx: true });
-    case "json":
-      return json();
-    case "rs":
-      return rust();
-    case "md":
-    case "markdown":
-      return markdown();
-    case "html":
-    case "htm":
-      return html();
-    case "css":
-    case "scss":
-      return css();
-    case "py":
-      return python();
-    default:
-      return null;
-  }
+  return LANGUAGES[extOf(path)]?.ext() ?? null;
+}
+
+function languageLabel(path: string): string {
+  return LANGUAGES[extOf(path)]?.label ?? "texto";
 }

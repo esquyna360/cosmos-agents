@@ -41,7 +41,7 @@ export default function WorkflowView() {
           </p>
         </div>
         <button
-          class="rounded border border-line px-2 py-1 text-[12px] text-dim hover:bg-white/5 hover:text-ink"
+          class="rounded border border-line px-2 py-1 text-[12px] text-dim hover:bg-fill-1 hover:text-ink"
           onClick={() => setWorkflowOpen(false)}
         >
           close

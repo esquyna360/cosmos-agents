@@ -9,7 +9,10 @@ import {
   onMount,
 } from "solid-js";
 
+import { CornerDownLeft, FileSearch, Search } from "lucide-solid";
+
 import { fsGrep, fsWalk, type GrepMatch } from "../lib/fs";
+import { iconForFile } from "../lib/fileIcons";
 import { openFileInEditor } from "../stores/projects";
 
 export type PaletteMode = "files" | "grep";
@@ -156,84 +159,121 @@ export default function CommandPalette(props: Props) {
 
   return (
     <div
-      class="absolute inset-0 z-50 flex items-start justify-center bg-black/40 backdrop-blur-sm"
+      class="fixed inset-0 z-50 flex items-start justify-center bg-sunken backdrop-blur-sm"
       onClick={(e) => {
         if (e.target === e.currentTarget) props.onClose();
       }}
     >
-      <div class="mt-20 w-[640px] max-w-[90vw] overflow-hidden rounded-lg border border-line bg-float shadow-2xl">
-        <div class="flex items-center gap-2 border-b border-line px-3 py-2 text-xs uppercase tracking-wider text-faint">
-          {props.mode === "files" ? "find file" : "search in files"}
+      <div class="cx-glass cx-sheet mt-[12vh] flex max-h-[70vh] w-[660px] max-w-[92vw] flex-col overflow-hidden rounded-cx-lg border border-line">
+        <div class="flex shrink-0 items-center gap-2 px-3 pt-2.5">
+          <span class="shrink-0 text-faint">
+            {props.mode === "files" ? <FileSearch size={13} /> : <Search size={13} />}
+          </span>
+          <input
+            ref={inputRef}
+            class="min-w-0 flex-1 bg-transparent py-1 text-[14px] text-ink outline-none placeholder:text-faint"
+            placeholder={
+              props.mode === "files"
+                ? "abrir arquivo por nome…"
+                : "buscar no conteúdo (2+ caracteres)…"
+            }
+            value={query()}
+            onInput={(e) => setQuery(e.currentTarget.value)}
+          />
           <Show when={showRootLabel()}>
-            <span class="text-faint">· {props.roots.length} roots</span>
+            <span class="shrink-0 rounded-full border border-line px-2 py-0.5 text-[10px] text-faint">
+              {props.roots.length} pastas
+            </span>
           </Show>
-          <span class="ml-auto text-faint">esc to close</span>
+          <span class="shrink-0 text-[10.5px] text-faint">esc fecha</span>
         </div>
-        <input
-          ref={inputRef}
-          class="w-full bg-transparent px-3 py-2.5 text-sm text-white outline-none placeholder:text-faint"
-          placeholder={
-            props.mode === "files"
-              ? "filename fragment…"
-              : "text to find (>=2 chars)…"
-          }
-          value={query()}
-          onInput={(e) => setQuery(e.currentTarget.value)}
-        />
-        <ul class="max-h-[420px] overflow-y-auto border-t border-line">
+
+        <div class="mt-2 shrink-0 border-t border-line" />
+
+        <ul class="min-h-0 flex-1 overflow-y-auto p-1">
           <Show when={props.mode === "files"}>
             <For each={filteredFiles()}>
-              {(f, i) => (
-                <li>
-                  <button
-                    class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-white/5"
-                    classList={{ "bg-white/10": cursor() === i() }}
-                    onMouseEnter={() => setCursor(i())}
-                    onClick={pickCurrent}
-                  >
-                    <span class="truncate text-ink">{basename(f.rel)}</span>
-                    <span class="ml-auto truncate text-[11px] text-faint">
-                      <Show when={showRootLabel()}>
-                        <span class="text-dim">{basename(f.root)}/</span>
+              {(f, i) => {
+                const { Icon, color } = iconForFile(basename(f.rel));
+                const on = () => cursor() === i();
+                return (
+                  <li>
+                    <button
+                      class="relative flex w-full items-center gap-2 rounded-cx px-2 py-1.5 text-left text-[13px] transition"
+                      classList={{
+                        "bg-accent-soft text-ink shadow-[inset_2px_0_0_0_var(--accent)]":
+                          on(),
+                        "text-dim hover:bg-fill-1": !on(),
+                      }}
+                      onMouseEnter={() => setCursor(i())}
+                      onClick={pickCurrent}
+                    >
+                      <Icon size={13} class="shrink-0" style={{ color }} />
+                      <span class="truncate text-ink">{basename(f.rel)}</span>
+                      <span class="ml-auto truncate pl-3 text-[11px] text-faint">
+                        <Show when={showRootLabel()}>
+                          <span class="text-dim">{basename(f.root)}/</span>
+                        </Show>
+                        {dirname(f.rel)}
+                      </span>
+                      <Show when={on()}>
+                        <CornerDownLeft size={11} class="shrink-0 text-accent" />
                       </Show>
-                      {dirname(f.rel)}
-                    </span>
-                  </button>
-                </li>
-              )}
+                    </button>
+                  </li>
+                );
+              }}
             </For>
           </Show>
           <Show when={props.mode === "grep"}>
             <For each={grepResults() ?? []}>
-              {(m, i) => (
-                <li>
-                  <button
-                    class="flex w-full flex-col items-start gap-0.5 px-3 py-1.5 text-left text-sm hover:bg-white/5"
-                    classList={{ "bg-white/10": cursor() === i() }}
-                    onMouseEnter={() => setCursor(i())}
-                    onClick={pickCurrent}
-                  >
-                    <span class="text-[11px] text-faint">
-                      <Show when={showRootLabel()}>
-                        <span class="text-dim">{basename(m.root)}/</span>
-                      </Show>
-                      {m.path}:{m.line}
-                    </span>
-                    <span class="line-clamp-1 w-full truncate text-ink">
-                      {m.text}
-                    </span>
-                  </button>
-                </li>
-              )}
+              {(m, i) => {
+                const on = () => cursor() === i();
+                return (
+                  <li>
+                    <button
+                      class="flex w-full flex-col items-start gap-0.5 rounded-cx px-2 py-1.5 text-left transition"
+                      classList={{
+                        "bg-accent-soft shadow-[inset_2px_0_0_0_var(--accent)]": on(),
+                        "hover:bg-fill-1": !on(),
+                      }}
+                      onMouseEnter={() => setCursor(i())}
+                      onClick={pickCurrent}
+                    >
+                      <span class="text-[10.5px] text-faint">
+                        <Show when={showRootLabel()}>
+                          <span class="text-dim">{basename(m.root)}/</span>
+                        </Show>
+                        {m.path}:{m.line}
+                      </span>
+                      <span class="w-full truncate font-mono text-[12px] text-ink">
+                        {m.text}
+                      </span>
+                    </button>
+                  </li>
+                );
+              }}
             </For>
           </Show>
           <Show when={total() === 0 && query().length > 0}>
-            <li class="px-3 py-3 text-sm text-faint">no matches</li>
+            <li class="px-3 py-4 text-center text-[12.5px] text-faint">
+              nada com “{query()}”
+            </li>
           </Show>
           <Show when={props.mode === "grep" && query().length === 1}>
-            <li class="px-3 py-3 text-sm text-faint">type 2+ characters</li>
+            <li class="px-3 py-4 text-center text-[12.5px] text-faint">
+              digite 2+ caracteres
+            </li>
           </Show>
         </ul>
+
+        <div class="flex shrink-0 items-center gap-3 border-t border-line px-3 py-1.5 text-[10.5px] text-faint">
+          <span>↑↓ navegar</span>
+          <span>⏎ abrir</span>
+          <span class="ml-auto tabular-nums">
+            {total()} resultado{total() === 1 ? "" : "s"}
+          </span>
+        </div>
       </div>
     </div>
   );

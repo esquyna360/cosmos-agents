@@ -1,4 +1,4 @@
-import { onCleanup, onMount } from "solid-js";
+import { createEffect, on, onCleanup, onMount } from "solid-js";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -6,6 +6,7 @@ import { SearchAddon } from "@xterm/addon-search";
 
 import { ptyAttach, ptyDetach, ptyResize, ptySpawn, ptyWrite } from "../lib/ipc";
 import { markRunnerLive } from "../stores/projects";
+import { readTerminalPalette, themeTick } from "../stores/theme";
 import type { RunnerUI } from "../stores/projects";
 
 interface Props {
@@ -31,29 +32,7 @@ export default function Terminal(props: Props) {
       fontFamily: '"Fira Code", ui-monospace, monospace',
       fontSize: 13,
       lineHeight: 1.2,
-      theme: {
-        background: "#0a0c11",
-        foreground: "#e9ecf1",
-        cursor: "#7aa2ff",
-        cursorAccent: "#0a0c11",
-        selectionBackground: "rgba(122, 162, 255, 0.28)",
-        black: "#0a0c11",
-        red: "#fb7185",
-        green: "#34d399",
-        yellow: "#fbbf24",
-        blue: "#7aa2ff",
-        magenta: "#c4a2ff",
-        cyan: "#5eead4",
-        white: "#d5dae3",
-        brightBlack: "#626b7b",
-        brightRed: "#fda4af",
-        brightGreen: "#6ee7b7",
-        brightYellow: "#fcd34d",
-        brightBlue: "#a3c0ff",
-        brightMagenta: "#ddc9ff",
-        brightCyan: "#99f6e4",
-        brightWhite: "#f4f6f9",
-      },
+      theme: readTerminalPalette(),
       cursorBlink: true,
       allowProposedApi: true,
       scrollback: 20_000,
@@ -135,6 +114,18 @@ export default function Terminal(props: Props) {
         console.error("revive failed", e);
       }
     }
+
+    // xterm caches the palette it was constructed with, so a theme swap has
+    // to be pushed into it explicitly.
+    createEffect(
+      on(
+        themeTick,
+        () => {
+          term.options.theme = readTerminalPalette();
+        },
+        { defer: true },
+      ),
+    );
 
     const ro = new ResizeObserver(() => fit.fit());
     ro.observe(host);

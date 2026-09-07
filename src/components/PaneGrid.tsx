@@ -92,17 +92,22 @@ function Pane(props: {
 
   return (
     <section
-      class="cx-pane flex min-h-0 min-w-0 flex-col overflow-hidden rounded-cx border bg-panel transition-colors"
+      class="cx-pane relative flex min-h-0 min-w-0 flex-col overflow-hidden rounded-cx border bg-panel shadow-cx transition-colors"
       classList={{
-        "border-white/15": isActive() && !props.single,
+        "border-accent": isActive() && !props.single,
         "border-line": !isActive() || props.single,
       }}
       style={{ "grid-area": props.area }}
       onMouseDown={() => setActiveSlot(props.index)}
     >
+      {/* Which pane the composer types into has to be readable at a glance —
+          the same reason the sidebar's selected runner gets an accent rail. */}
+      <Show when={isActive() && !props.single}>
+        <span class="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-accent" />
+      </Show>
       <header
         class="flex h-8 shrink-0 items-center gap-1.5 border-b border-line px-2"
-        classList={{ "bg-white/[0.04]": isActive() && !props.single }}
+        classList={{ "bg-accent-soft": isActive() && !props.single }}
       >
         <Show
           when={props.runner}
@@ -121,7 +126,7 @@ function Pane(props: {
               </span>
               <StatusPip runner={r()} />
               <button
-                class="flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-[12px] text-dim transition hover:bg-white/8 hover:text-ink"
+                class="flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-[12px] text-dim transition hover:bg-fill-2 hover:text-ink"
                 onClick={() => setPicking((v) => !v)}
                 title="trocar o runner deste painel"
               >
@@ -130,7 +135,7 @@ function Pane(props: {
               </button>
               <span class="ml-auto" />
               <Show when={!r().live}>
-                <span class="mr-1 rounded bg-white/8 px-1.5 py-0.5 text-[10px] text-faint">
+                <span class="mr-1 rounded bg-fill-2 px-1.5 py-0.5 text-[10px] text-faint">
                   parado
                 </span>
               </Show>
@@ -164,7 +169,7 @@ function Pane(props: {
         <Show when={!props.runner}>
           <span class="ml-auto" />
           <button
-            class="flex items-center gap-1 rounded-md border border-line px-2 py-0.5 text-[11px] text-dim transition hover:border-white/25 hover:bg-white/6 hover:text-ink"
+            class="flex items-center gap-1 rounded-md border border-line px-2 py-0.5 text-[11px] text-dim transition hover:border-line-strong hover:bg-fill-2 hover:text-ink"
             onClick={() => setPicking((v) => !v)}
           >
             <Plus size={10} />
@@ -227,7 +232,7 @@ function PaneAction(props: {
 }) {
   return (
     <button
-      class="flex h-5 w-5 shrink-0 items-center justify-center rounded text-faint transition hover:bg-white/10 hover:text-ink"
+      class="flex h-5 w-5 shrink-0 items-center justify-center rounded text-faint transition hover:bg-fill-3 hover:text-ink"
       title={props.label}
       onClick={(e) => {
         e.stopPropagation();
@@ -242,7 +247,7 @@ function PaneAction(props: {
 function StatusPip(props: { runner: RunnerUI }) {
   const cls = () => {
     const r = props.runner;
-    if (!r.live || r.status === "exited") return "bg-white/20";
+    if (!r.live || r.status === "exited") return "bg-fill-4";
     if (r.status === "awaiting_input") return "bg-alert cx-pulse";
     if (r.status === "error") return "bg-alert";
     if (r.status === "streaming" || r.status === "tool_running")
@@ -276,8 +281,8 @@ function RunnerPicker(props: {
         <For each={props.project.runners}>
           {(r) => (
             <button
-              class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-dim transition hover:bg-white/8 hover:text-ink"
-              classList={{ "bg-white/6 text-ink": r.id === props.taken }}
+              class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-dim transition hover:bg-fill-2 hover:text-ink"
+              classList={{ "bg-fill-2 text-ink": r.id === props.taken }}
               onClick={() => props.onPick(r.id)}
             >
               {r.kind === "shell" ? (
@@ -295,14 +300,14 @@ function RunnerPicker(props: {
       </div>
       <div class="flex border-t border-line">
         <button
-          class="flex flex-1 items-center justify-center gap-1.5 py-1.5 text-[11px] text-dim transition hover:bg-white/8 hover:text-ink"
+          class="flex flex-1 items-center justify-center gap-1.5 py-1.5 text-[11px] text-dim transition hover:bg-fill-2 hover:text-ink"
           onClick={() => props.onNew("agent")}
         >
           <Bot size={11} /> novo agente
         </button>
-        <span class="w-px bg-white/8" />
+        <span class="w-px bg-fill-2" />
         <button
-          class="flex flex-1 items-center justify-center gap-1.5 py-1.5 text-[11px] text-dim transition hover:bg-white/8 hover:text-ink"
+          class="flex flex-1 items-center justify-center gap-1.5 py-1.5 text-[11px] text-dim transition hover:bg-fill-2 hover:text-ink"
           onClick={() => props.onNew("shell")}
         >
           <TerminalSquare size={11} /> novo shell

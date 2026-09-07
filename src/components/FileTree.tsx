@@ -239,8 +239,8 @@ function RowButton(props: {
 }) {
   return (
     <button
-      class="flex w-full items-center gap-1.5 truncate rounded px-1 text-left text-dim hover:bg-white/5 hover:text-ink"
-      classList={{ "bg-white/10 text-white": props.selected }}
+      class="flex w-full items-center gap-1.5 truncate rounded px-1 text-left text-dim hover:bg-fill-1 hover:text-ink"
+      classList={{ "bg-fill-3 text-ink": props.selected }}
       style={{ "padding-left": `${props.depth * 12 + 4}px` }}
       onClick={props.onClick}
     >

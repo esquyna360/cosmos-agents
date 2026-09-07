@@ -13,7 +13,7 @@ interface Props {
 
 export default function EditorTabs(props: Props) {
   return (
-    <div class="flex h-8 shrink-0 items-center gap-px overflow-x-auto border-b border-line bg-void">
+    <div class="flex h-8 shrink-0 items-center overflow-x-auto border-b border-line bg-panel">
       <For each={props.paths}>
         {(path) => {
           const isActive = () => props.active === path;
@@ -21,28 +21,36 @@ export default function EditorTabs(props: Props) {
           const { Icon, color } = iconForFile(basenameOf(path));
           return (
             <div
-              class="group flex h-full shrink-0 items-center gap-1.5 border-r border-line px-2 text-[12px] text-dim hover:bg-white/5"
-              classList={{ "bg-raised text-white": isActive() }}
+              class="group relative flex h-full shrink-0 items-center gap-1.5 border-r border-line px-2.5 text-[12px] text-dim transition hover:bg-fill-1"
+              classList={{ "bg-void text-ink": isActive() }}
             >
+              <Show when={isActive()}>
+                <span class="pointer-events-none absolute inset-x-0 top-0 h-[2px] bg-accent" />
+              </Show>
               <button
                 class="flex items-center gap-1.5"
                 onClick={() => props.onSelect(path)}
                 title={path}
               >
                 <Icon size={13} class="shrink-0" style={{ color }} />
-                <span class="max-w-[200px] truncate">{basenameOf(path)}</span>
+                <span
+                  class="max-w-[200px] truncate"
+                  classList={{ "font-medium": isActive() }}
+                >
+                  {basenameOf(path)}
+                </span>
                 <Show when={isDirty()}>
                   <span class="ml-0.5 text-[14px] leading-none text-dim">•</span>
                 </Show>
               </button>
               <button
-                class="rounded p-0.5 text-faint opacity-0 hover:text-ink group-hover:opacity-100"
+                class="rounded p-0.5 text-faint opacity-0 transition hover:bg-fill-2 hover:text-ink group-hover:opacity-100"
                 classList={{ "opacity-100": isActive() }}
                 onClick={(e) => {
                   e.stopPropagation();
                   props.onClose(path);
                 }}
-                title="close"
+                title="fechar"
               >
                 <X size={12} />
               </button>

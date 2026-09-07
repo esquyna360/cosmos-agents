@@ -289,6 +289,74 @@ fn fs_save_temp_image(request: tauri::ipc::Request<'_>) -> Result<String, String
     Ok(path.to_string_lossy().into_owned())
 }
 
+/* ------------------------------ settings ------------------------------ */
+
+#[tauri::command]
+fn remote_config_get(app: AppHandle) -> Result<serde_json::Value, String> {
+    let home = home_dir(&app)?;
+    let cfg = remote::load_config(&home);
+    let mut v = serde_json::to_value(&cfg).map_err(|e| e.to_string())?;
+    if let Some(obj) = v.as_object_mut() {
+        obj.insert("tunnel_running".into(), tunnel::is_running().into());
+        obj.insert(
+            "cloudflared_present".into(),
+            tunnel::binary().is_some().into(),
+        );
+    }
+    Ok(v)
+}
+
+/// Persists the remote settings and reconciles the tunnel immediately.
+/// `enabled` and `port` are read when the web server binds at launch, so a
+/// change to either only takes effect on the next start — the UI says so
+/// rather than pretending otherwise.
+#[tauri::command]
+fn remote_config_set(app: AppHandle, config: remote::RemoteConfig) -> Result<(), String> {
+    let home = home_dir(&app)?;
+    remote::save_config(&home, &config).map_err(|e| e.to_string())?;
+    remote::apply_tunnel(&home, &config);
+    Ok(())
+}
+
+#[tauri::command]
+fn projects_reorder(store: State<'_, Store>, ids: Vec<String>) -> Result<(), String> {
+    store.reorder("projects", &ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn runners_reorder(store: State<'_, Store>, ids: Vec<String>) -> Result<(), String> {
+    store.reorder("runners", &ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+/// Hands a URL to the OS browser. The in-app preview is an iframe, so any site
+/// that refuses framing needs an escape hatch.
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err("only http(s) urls".into());
+    }
+    #[cfg(target_os = "macos")]
+    let mut cmd = std::process::Command::new("open");
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", "start", ""]);
+        c
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut cmd = std::process::Command::new("xdg-open");
+
+    cmd.arg(&url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 fn home_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     app.path().home_dir().map_err(|e| e.to_string())
 }
@@ -602,6 +670,12 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            remote_config_get,
+            remote_config_set,
+            projects_reorder,
+            runners_reorder,
+            app_version,
+            open_external,
             pty_spawn,
             pty_status,
             pty_attach,

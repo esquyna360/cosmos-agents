@@ -25,7 +25,10 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
   frontmatter so they're portable in any MD reader. Pinned cards auto-flow
   into the multi-folder `.claude/CLAUDE.md` so Claude reads them every turn.
 - **Editor + Diff** view modes (CodeMirror 6 + `git diff`), state persisted
-  per project so view switches don't lose the open tab.
+  per project so view switches don't lose the open tab. The editor carries
+  the parts of VS Code that matter without extensions: search/replace
+  (`⌘F`), autocompletion, code folding, indent guides, multi-cursor,
+  bracket matching, breadcrumbs, a Ln/Col status bar and ~25 languages.
 - **Pane grid** — the main area is a grid of 1..4 panes: single, side by
   side, stacked, quadrants, or main + 2. Each slot holds any runner of the
   focused project and the assignment is remembered per project. A PTY is
@@ -36,6 +39,22 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
   transcript exists under `~/.claude/projects/`. Stopping a runner or
   sleeping a project kills the PTY and keeps the row, so clicking it again
   picks the conversation back up.
+- **Themes** — six palettes (Midnight, Graphite, Obsidian, Ember, Dawn,
+  Paper) driven entirely by CSS variables, so a swap is one attribute on
+  `<html>`. The terminal and the code editor read the same variables, so
+  nothing is left behind on the old palette. `⌘⇧T` cycles.
+- **Browser pane** — an iframe preview with a URL bar, back/forward/reload
+  and chips for whichever localhost ports are actually listening (probed with
+  an opaque `no-cors` fetch). Anything that refuses framing opens in the
+  system browser instead.
+- **Self-update** — checks GitHub Releases at launch and every 6 h on macOS
+  and Windows. Auto-install only fires when no runner is live, because
+  relaunching kills every PTY; otherwise it waits behind a banner.
+- **Settings sheet** (`⌘,`) — theme picker, keymap reference, and the remote
+  switches: web UI, Cloudflare tunnel (toggles live, no restart), Telegram
+  notifications.
+- **Drag to reorder** projects and runners in the sidebar; double-click any
+  name to rename in place. Order is persisted in a `position` column.
 - Sidebar resizable; markdown rendering via `marked`.
 
 ## Keymap
@@ -51,10 +70,14 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
 | `⌃1–4` | focus N-th pane |
 | `⌘\` | toggle split (single ↔ side by side) |
 | `⌘B` | show/hide the project sidebar |
-| `⌘E` | cycle view (runners → editor → diff → memory) |
+| `⌘E` | cycle view (runners → editor → diff → memory → browser) |
 | `⌘P` / `⌘⇧F` | file palette / grep |
 | `⌘I` | toggle composer |
 | `⌘D` | workflow overview |
+| `⌘,` | settings |
+| `⌘⇧T` | next theme |
+| `⌘F` | find/replace inside the editor |
+| `⌘S` | save now (files autosave anyway) |
 
 ## Stack
 
@@ -102,6 +125,11 @@ Requires Rust toolchain + Node 20+ + pnpm + macOS.
 pnpm install
 pnpm tauri dev
 ```
+
+Design work happens faster in a browser tab: `pnpm dev` alone serves the UI at
+<http://localhost:1420> with `src/lib/devMock.ts` standing in for the Rust
+backend (fake projects, runners and a file tree). It only loads when
+`__TAURI_INTERNALS__` is absent and is tree-shaken out of production builds.
 
 The release build (`pnpm tauri build`) produces a `.app` under
 `src-tauri/target/release/bundle/macos/`.

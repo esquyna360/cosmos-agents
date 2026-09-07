@@ -7,7 +7,7 @@
 
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -24,6 +24,40 @@ fn url_slot() -> &'static Mutex<Option<String>> {
 }
 
 static CHILD_PID: AtomicU32 = AtomicU32::new(0);
+/// Whether a tunnel is wanted. The supervisor loop checks this before every
+/// reconnect, so turning the tunnel off in settings ends the loop instead of
+/// leaving a thread that respawns cloudflared five seconds later.
+static WANTED: AtomicBool = AtomicBool::new(false);
+/// Guards against two supervisor threads after an off/on/off/on flurry.
+static RUNNING: AtomicBool = AtomicBool::new(false);
+
+pub fn is_running() -> bool {
+    RUNNING.load(Ordering::SeqCst)
+}
+
+/// Stops the supervisor and kills cloudflared. Safe to call when nothing is
+/// running.
+pub fn stop() {
+    WANTED.store(false, Ordering::SeqCst);
+    let pid = CHILD_PID.swap(0, Ordering::SeqCst);
+    if pid != 0 {
+        // Shelling out beats taking a libc dependency for one signal, and
+        // cloudflared is an external process either way.
+        #[cfg(unix)]
+        let _ = Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        #[cfg(windows)]
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    *url_slot().lock().unwrap() = None;
+}
 
 pub fn current_url() -> Option<String> {
     url_slot().lock().ok().and_then(|u| u.clone())
@@ -62,15 +96,27 @@ where
         return;
     };
 
+    WANTED.store(true, Ordering::SeqCst);
+    if RUNNING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
     std::thread::Builder::new()
         .name("cosmos-tunnel".into())
-        .spawn(move || loop {
-            match run_once(&bin, port, &on_url) {
-                Ok(()) => eprintln!("[cosmos] tunnel closed, reconnecting"),
-                Err(e) => eprintln!("[cosmos] tunnel error: {e}"),
+        .spawn(move || {
+            while WANTED.load(Ordering::SeqCst) {
+                match run_once(&bin, port, &on_url) {
+                    Ok(()) => eprintln!("[cosmos] tunnel closed, reconnecting"),
+                    Err(e) => eprintln!("[cosmos] tunnel error: {e}"),
+                }
+                *url_slot().lock().unwrap() = None;
+                if !WANTED.load(Ordering::SeqCst) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_secs(5));
             }
-            *url_slot().lock().unwrap() = None;
-            std::thread::sleep(Duration::from_secs(5));
+            RUNNING.store(false, Ordering::SeqCst);
+            eprintln!("[cosmos] tunnel supervisor stopped");
         })
         .ok();
 }
@@ -100,6 +146,9 @@ where
 
     if let Some(err) = child.stderr.take() {
         for line in BufReader::new(err).lines().map_while(Result::ok) {
+            if !WANTED.load(Ordering::SeqCst) {
+                break;
+            }
             if let Some(url) = extract_url(&line) {
                 let mut slot = url_slot().lock().unwrap();
                 if slot.as_deref() != Some(url.as_str()) {
@@ -111,6 +160,9 @@ where
         }
     }
 
+    if !WANTED.load(Ordering::SeqCst) {
+        let _ = child.kill();
+    }
     let _ = child.wait();
     CHILD_PID.store(0, Ordering::SeqCst);
     Ok(())

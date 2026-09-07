@@ -73,8 +73,8 @@ export default function StatusDot(props: Props) {
         <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}>
           <polygon
             points={`${SIZE / 2},1 ${SIZE - 1},${SIZE - 1} 1,${SIZE - 1}`}
-            fill="#f59e0b"
-            style={{ filter: "drop-shadow(0 0 4px #f59e0b)" }}
+            fill="var(--busy)"
+            style={{ filter: "drop-shadow(0 0 4px var(--busy))" }}
           />
         </svg>
       </Show>
@@ -82,7 +82,7 @@ export default function StatusDot(props: Props) {
         <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}>
           <path
             d={`M2 2 L${SIZE - 2} ${SIZE - 2} M${SIZE - 2} 2 L2 ${SIZE - 2}`}
-            stroke="#ef4444"
+            stroke="var(--alert)"
             stroke-width={1.6}
             stroke-linecap="round"
           />

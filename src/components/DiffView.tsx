@@ -78,7 +78,7 @@ export default function DiffView(props: Props) {
           git diff · {props.roots.length === 1 ? props.roots[0] : `${props.roots.length} roots`}
         </span>
         <button
-          class="rounded px-2 py-0.5 text-dim hover:bg-white/10 hover:text-ink"
+          class="rounded px-2 py-0.5 text-dim hover:bg-fill-3 hover:text-ink"
           onClick={() => bumpReload(reloadToken() + 1)}
           title="refresh"
         >
@@ -132,22 +132,22 @@ function DiffEditor(props: { doc: string }) {
             ".cm-gutters": {
               backgroundColor: "transparent",
               border: "none",
-              color: "rgba(255,255,255,0.25)",
+              color: "var(--text-faint)",
             },
             ".cm-line": { padding: "0 10px" },
             ".cosmos-diff-add": {
-              backgroundColor: "rgba(46,160,67,0.16)",
-              color: "#7ee787",
+              backgroundColor: "color-mix(in srgb, var(--live) 15%, transparent)",
+              color: "var(--live)",
             },
             ".cosmos-diff-del": {
-              backgroundColor: "rgba(248,81,73,0.18)",
-              color: "#ffa198",
+              backgroundColor: "color-mix(in srgb, var(--alert) 15%, transparent)",
+              color: "var(--alert)",
             },
             ".cosmos-diff-hunk": {
-              color: "#7d9bd5",
-              backgroundColor: "rgba(125,155,213,0.07)",
+              color: "var(--accent)",
+              backgroundColor: "var(--accent-soft)",
             },
-            ".cosmos-diff-meta": { color: "#7e8693" },
+            ".cosmos-diff-meta": { color: "var(--text-faint)" },
           }),
           diffHighlight(),
         ],

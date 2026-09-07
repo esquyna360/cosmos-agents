@@ -130,10 +130,10 @@ export default function RunnerTabs(props: Props) {
               <div
                 class="group relative flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 transition"
                 classList={{
-                  "border-white/18 bg-white/10 text-ink": isActive(),
-                  "border-white/8 bg-white/[0.03] text-dim":
+                  "border-line-strong bg-fill-3 text-ink": isActive(),
+                  "border-line bg-fill-1 text-dim":
                     onScreen() && !isActive(),
-                  "border-transparent text-faint hover:border-white/8 hover:bg-white/[0.04] hover:text-dim":
+                  "border-transparent text-faint hover:border-line hover:bg-fill-1 hover:text-dim":
                     !onScreen(),
                 }}
               >
@@ -158,7 +158,7 @@ export default function RunnerTabs(props: Props) {
                         (r.status === "streaming" || r.status === "tool_running"),
                       "bg-alert cx-pulse": r.status === "awaiting_input",
                       "bg-alert": r.status === "error",
-                      "bg-white/20": !r.live || r.status === "exited",
+                      "bg-fill-4": !r.live || r.status === "exited",
                     }}
                   />
                   <InlineEdit
@@ -174,7 +174,7 @@ export default function RunnerTabs(props: Props) {
                   </InlineEdit>
                 </button>
                 <button
-                  class="ml-0.5 hidden rounded p-0.5 text-faint transition hover:bg-white/10 hover:text-ink group-hover:inline-flex"
+                  class="ml-0.5 hidden rounded p-0.5 text-faint transition hover:bg-fill-3 hover:text-ink group-hover:inline-flex"
                   onClick={(e) => {
                     e.stopPropagation();
                     if (e.altKey) {
@@ -200,7 +200,7 @@ export default function RunnerTabs(props: Props) {
       <div class="ml-auto flex shrink-0 items-center gap-1 pl-1">
         <div class="relative shrink-0">
           <button
-            class="flex shrink-0 items-center gap-1 rounded-lg border border-line px-2 py-1 text-dim transition hover:border-white/25 hover:bg-white/6 hover:text-ink"
+            class="flex shrink-0 items-center gap-1 rounded-lg border border-line px-2 py-1 text-dim transition hover:border-line-strong hover:bg-fill-2 hover:text-ink"
             onClick={() =>
               agentDropdownOpen() ? closeAgentDropdown() : openAgentDropdown()
             }
@@ -221,7 +221,7 @@ export default function RunnerTabs(props: Props) {
         </div>
         <div class="relative shrink-0">
           <button
-            class="flex shrink-0 items-center gap-1 rounded-lg border border-line px-2 py-1 text-dim transition hover:border-white/25 hover:bg-white/6 hover:text-ink"
+            class="flex shrink-0 items-center gap-1 rounded-lg border border-line px-2 py-1 text-dim transition hover:border-line-strong hover:bg-fill-2 hover:text-ink"
             onClick={() =>
               shellDropdownOpen() ? closeShellDropdown() : openShellDropdown()
             }
@@ -266,7 +266,7 @@ function AgentDropdown(props: {
       data-agent-dropdown
       class="cx-sheet absolute right-0 top-full z-30 mt-1.5 w-60 overflow-hidden rounded-cx border border-line bg-float shadow-2xl"
     >
-      <div class="border-b border-line bg-white/[0.02] px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-faint">
+      <div class="border-b border-line bg-fill-1 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-faint">
         escolha a CLI
       </div>
       <Show
@@ -284,7 +284,7 @@ function AgentDropdown(props: {
               <button
                 class="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] transition disabled:cursor-not-allowed disabled:opacity-40"
                 classList={{
-                  "text-ink hover:bg-white/8": cli.available,
+                  "text-ink hover:bg-fill-2": cli.available,
                   "text-faint": !cli.available,
                 }}
                 disabled={!cli.available}
@@ -332,7 +332,7 @@ function ShellDropdown(props: {
       class="cx-sheet absolute right-0 top-full z-30 mt-1.5 max-h-80 w-64 overflow-y-auto rounded-cx border border-line bg-float shadow-2xl"
     >
       <button
-        class="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-ink transition hover:bg-white/8"
+        class="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-ink transition hover:bg-fill-2"
         onClick={props.onSpawnBlank}
       >
         <TerminalSquare size={11} class="shrink-0 opacity-60" />
@@ -354,7 +354,7 @@ function ShellDropdown(props: {
       <For each={props.folderScripts}>
         {(fs) => (
           <>
-            <div class="border-t border-line bg-white/[0.02] px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-faint">
+            <div class="border-t border-line bg-fill-1 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-faint">
               <Show
                 when={props.multiFolder}
                 fallback={<>scripts ({fs.packageManager})</>}
@@ -365,7 +365,7 @@ function ShellDropdown(props: {
             <For each={fs.scripts}>
               {(s) => (
                 <button
-                  class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-dim transition hover:bg-white/8 hover:text-ink"
+                  class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-dim transition hover:bg-fill-2 hover:text-ink"
                   onClick={() => props.onSpawnScript(fs, s.name, s.command)}
                   title={s.command}
                 >

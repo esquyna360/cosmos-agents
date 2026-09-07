@@ -174,7 +174,7 @@ function CardList(props: {
     <aside class="flex w-[320px] shrink-0 flex-col bg-void">
       <div class="flex shrink-0 items-center gap-2 px-3 py-2">
         <button
-          class="flex shrink-0 items-center gap-1.5 rounded-md bg-white/10 px-2.5 py-1 text-[12px] text-white hover:bg-white/15"
+          class="flex shrink-0 items-center gap-1.5 rounded-md bg-fill-3 px-2.5 py-1 text-[12px] text-ink hover:bg-fill-4"
           onClick={props.onNew}
           title="new memory card"
         >
@@ -187,7 +187,7 @@ function CardList(props: {
             class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-faint"
           />
           <input
-            class="w-full rounded-lg border border-line bg-black/30 py-1 pl-6 pr-2 text-[12px] text-white outline-none placeholder:text-faint focus:border-white/25"
+            class="w-full rounded-lg border border-line bg-sunken py-1 pl-6 pr-2 text-[12px] text-ink outline-none placeholder:text-faint focus:border-line-strong"
             placeholder="search"
             value={props.search}
             onInput={(e) => props.onSetSearch(e.currentTarget.value)}
@@ -252,8 +252,8 @@ function KindPill(props: {
     <button
       class="flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] transition"
       classList={{
-        "border-white/30 bg-white/15 text-white": props.active,
-        "border-line text-dim hover:border-white/20 hover:text-ink":
+        "border-line-strong bg-fill-4 text-ink": props.active,
+        "border-line text-dim hover:border-line-strong hover:text-ink":
           !props.active,
       }}
       onClick={props.onClick}
@@ -286,9 +286,9 @@ function CardRow(props: {
   return (
     <li>
       <button
-        class="group flex w-full flex-col gap-1.5 rounded-md border bg-white/[0.02] p-2.5 text-left transition hover:bg-white/[0.05]"
+        class="group flex w-full flex-col gap-1.5 rounded-md border bg-fill-1 p-2.5 text-left transition hover:bg-fill-1"
         classList={{
-          "!border-white/25 !bg-white/[0.08]": props.active,
+          "!border-line-strong !bg-fill-2": props.active,
           [accent().border]: !props.active,
         }}
         onClick={props.onClick}
@@ -313,7 +313,7 @@ function CardRow(props: {
           <div class="flex flex-wrap gap-1">
             <For each={props.card.tags.slice(0, 4)}>
               {(t) => (
-                <span class="rounded-full bg-white/[0.06] px-1.5 py-[1px] text-[9.5px] text-dim">
+                <span class="rounded-full bg-fill-2 px-1.5 py-[1px] text-[9.5px] text-dim">
                   #{t}
                 </span>
               )}
@@ -422,7 +422,7 @@ function CardDetail(props: {
       {/* Toolbar */}
       <div class="flex shrink-0 items-center gap-2 border-b border-line px-4 py-2">
         <input
-          class="min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-[14px] font-medium text-white outline-none placeholder:text-faint hover:bg-white/[0.04] focus:bg-white/[0.06]"
+          class="min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-[14px] font-medium text-ink outline-none placeholder:text-faint hover:bg-fill-1 focus:bg-fill-2"
           placeholder="untitled"
           value={title()}
           onInput={(e) => {
@@ -431,7 +431,7 @@ function CardDetail(props: {
           }}
           onBlur={() => commitImmediate({})}
         />
-        <div class="flex shrink-0 items-center gap-0.5 rounded-md border border-line bg-white/[0.03] p-0.5">
+        <div class="flex shrink-0 items-center gap-0.5 rounded-md border border-line bg-fill-1 p-0.5">
           <ToggleSeg
             active={props.mode === "edit"}
             onClick={() => props.onSetMode("edit")}
@@ -449,7 +449,7 @@ function CardDetail(props: {
           class="shrink-0 rounded p-1.5"
           classList={{
             "text-amber-300/90 hover:bg-amber-300/10": !!card()?.pinned,
-            "text-faint hover:bg-white/10 hover:text-ink": !card()?.pinned,
+            "text-faint hover:bg-fill-3 hover:text-ink": !card()?.pinned,
           }}
           onClick={onTogglePin}
           title={
@@ -476,9 +476,9 @@ function CardDetail(props: {
           <For each={KINDS}>
             {(k) => (
               <button
-                class="flex items-center gap-1 rounded px-2 py-0.5 text-dim transition hover:bg-white/5 hover:text-ink"
+                class="flex items-center gap-1 rounded px-2 py-0.5 text-dim transition hover:bg-fill-1 hover:text-ink"
                 classList={{
-                  "!bg-white/10 !text-white": card()?.kind === k.id,
+                  "!bg-fill-3 !text-ink": card()?.kind === k.id,
                 }}
                 onClick={() => onKindChange(k.id)}
               >
@@ -494,7 +494,7 @@ function CardDetail(props: {
         <div class="flex flex-wrap items-center gap-1">
           <For each={card()?.tags ?? []}>
             {(t) => (
-              <span class="group/tag flex items-center gap-1 rounded-full bg-white/[0.06] px-2 py-[1px] text-dim">
+              <span class="group/tag flex items-center gap-1 rounded-full bg-fill-2 px-2 py-[1px] text-dim">
                 <span>#{t}</span>
                 <button
                   class="text-faint hover:text-ink"
@@ -506,7 +506,7 @@ function CardDetail(props: {
             )}
           </For>
           <input
-            class="w-24 rounded-md bg-transparent px-1.5 py-0.5 text-white outline-none placeholder:text-faint focus:bg-white/[0.04]"
+            class="w-24 rounded-md bg-transparent px-1.5 py-0.5 text-ink outline-none placeholder:text-faint focus:bg-fill-1"
             placeholder="+ tag"
             value={tagDraft()}
             onInput={(e) => setTagDraft(e.currentTarget.value)}
@@ -565,8 +565,8 @@ function ToggleSeg(props: {
 }) {
   return (
     <button
-      class="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-dim transition hover:bg-white/5 hover:text-ink"
-      classList={{ "!bg-white/15 !text-white": props.active }}
+      class="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-dim transition hover:bg-fill-1 hover:text-ink"
+      classList={{ "!bg-fill-4 !text-ink": props.active }}
       onClick={props.onClick}
     >
       <props.icon size={10} />
@@ -638,7 +638,7 @@ function MarkdownEditor(props: {
 function EmptyDetail(props: { hasAnyCards: boolean; onNew: () => void }) {
   return (
     <div class="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-faint">
-      <Brain size={28} class="text-white/25" />
+      <Brain size={28} class="text-faint" />
       <Show
         when={props.hasAnyCards}
         fallback={
@@ -646,14 +646,14 @@ function EmptyDetail(props: { hasAnyCards: boolean; onNew: () => void }) {
             <p class="text-sm">no memory yet — your project, your context</p>
             <p class="max-w-sm text-[12px] leading-relaxed text-faint">
               cards are markdown files saved to{" "}
-              <code class="rounded bg-white/[0.06] px-1 py-0.5 text-[11px]">
+              <code class="rounded bg-fill-2 px-1 py-0.5 text-[11px]">
                 ~/.cosmos/projects/&lt;slug&gt;/memories/
               </code>
               . pinned cards auto-flow into the project's generated CLAUDE.md
               so Claude reads them on every turn.
             </p>
             <button
-              class="mt-1 flex items-center gap-1.5 rounded-md bg-white/15 px-3 py-1.5 text-[12.5px] font-medium text-white hover:bg-white/25"
+              class="mt-1 flex items-center gap-1.5 rounded-md bg-fill-4 px-3 py-1.5 text-[12.5px] font-medium text-ink hover:bg-fill-4"
               onClick={props.onNew}
             >
               <Plus size={12} />
