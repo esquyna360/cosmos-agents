@@ -1,16 +1,17 @@
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { Bot, ChevronDown, TerminalSquare, X } from "lucide-solid";
+import { Bot, ChevronDown, Power, TerminalSquare, Trash2 } from "lucide-solid";
 
 import {
-  closeRunner,
+  consumePendingRename,
   createRunnerInProject,
-  focusedRunner,
+  deleteRunner,
   focusRunner,
   pendingRenameId,
-  consumePendingRename,
   renameRunner,
+  stopRunner,
   type ProjectUI,
 } from "../stores/projects";
+import { activeSlot, slotsFor } from "../stores/panes";
 import {
   readPackageScripts,
   scriptInvocation,
@@ -39,7 +40,8 @@ interface FolderScripts {
 
 export default function RunnerTabs(props: Props) {
   const p = () => props.project;
-  const activeId = () => focusedRunner()?.id ?? null;
+  const shown = () => new Set(slotsFor(p().id).filter(Boolean) as string[]);
+  const inActiveSlot = () => slotsFor(p().id)[activeSlot()] ?? null;
 
   const [shellDropdownOpen, setShellDropdownOpen] = createSignal(false);
   const [agentDropdownOpen, setAgentDropdownOpen] = createSignal(false);
@@ -73,23 +75,19 @@ export default function RunnerTabs(props: Props) {
     }
   }
 
-  function closeShellDropdown() {
-    setShellDropdownOpen(false);
-  }
+  const closeShellDropdown = () => setShellDropdownOpen(false);
+  const closeAgentDropdown = () => setAgentDropdownOpen(false);
 
-  async function openAgentDropdown() {
+  function openAgentDropdown() {
     setAgentDropdownOpen(true);
-    // Trigger detection if it hasn't run yet. Fast no-op on subsequent opens.
     ensureClisDetected().catch(console.error);
-  }
-  function closeAgentDropdown() {
-    setAgentDropdownOpen(false);
   }
 
   async function spawnAgent(cli: CliInfo) {
     closeAgentDropdown();
-    // Runner name shows the CLI so multiple agents are distinguishable.
-    const existing = p().runners.filter((r) => r.kind === "agent" && r.name.startsWith(cli.id));
+    const existing = p().runners.filter(
+      (r) => r.kind === "agent" && r.name.startsWith(cli.id),
+    );
     const nameSuffix = existing.length === 0 ? "" : `-${existing.length + 1}`;
     await createRunnerInProject(p().id, "agent", {
       name: `${cli.id}${nameSuffix}`,
@@ -117,45 +115,50 @@ export default function RunnerTabs(props: Props) {
       program,
       args,
     }).catch(console.error);
-    // Hint to UI that the shell is running `cmd` — purely informational for
-    // a future tooltip. cmd unused at runtime.
     void cmd;
   }
 
   return (
-    <div class="flex shrink-0 items-stretch gap-0.5 overflow-x-visible border-b border-white/5 bg-[#0a0c0f] px-2 py-1 text-[12px]">
-      <div class="flex items-stretch gap-0.5 overflow-x-auto">
+    <div class="flex shrink-0 items-stretch gap-1 border-b border-line bg-panel px-2 py-1.5 text-[12px]">
+      <div class="flex min-w-0 items-stretch gap-1 overflow-x-auto">
         <For each={p().runners}>
           {(r) => {
-            const isActive = () => activeId() === r.id;
-            const isShell = () => r.kind === "shell";
+            const onScreen = () => shown().has(r.id);
+            const isActive = () => inActiveSlot() === r.id;
             const autoEdit = () => pendingRenameId() === r.id;
             return (
               <div
-                class="group relative flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 transition"
+                class="group relative flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 transition"
                 classList={{
-                  "border-white/15 bg-white/10 text-white": isActive(),
-                  "border-transparent text-white/65 hover:border-white/10 hover:bg-white/5":
-                    !isActive(),
+                  "border-white/18 bg-white/10 text-ink": isActive(),
+                  "border-white/8 bg-white/[0.03] text-dim":
+                    onScreen() && !isActive(),
+                  "border-transparent text-faint hover:border-white/8 hover:bg-white/[0.04] hover:text-dim":
+                    !onScreen(),
                 }}
               >
                 <button
                   class="flex items-center gap-1.5"
                   onClick={() => focusRunner(p().id, r.id)}
-                  title={`${r.kind} · ${r.name}`}
+                  title={`${r.kind} · ${r.name}${r.live ? "" : " · parado — clique para retomar"}`}
                 >
-                  <span class="shrink-0 text-white/60">
-                    {isShell() ? <TerminalSquare size={11} /> : <Bot size={11} />}
+                  <span class="shrink-0 opacity-60">
+                    {r.kind === "shell" ? (
+                      <TerminalSquare size={11} />
+                    ) : (
+                      <Bot size={11} />
+                    )}
                   </span>
                   <span
                     class="h-1.5 w-1.5 shrink-0 rounded-full"
                     classList={{
-                      "bg-emerald-400/80": r.live && r.status === "idle",
-                      "bg-amber-300/80":
-                        r.status === "streaming" || r.status === "tool_running",
-                      "bg-rose-400/90":
-                        r.status === "awaiting_input" || r.status === "error",
-                      "bg-white/25": !r.live || r.status === "exited",
+                      "bg-live": r.live && r.status === "idle",
+                      "bg-busy cx-pulse":
+                        r.live &&
+                        (r.status === "streaming" || r.status === "tool_running"),
+                      "bg-alert cx-pulse": r.status === "awaiting_input",
+                      "bg-alert": r.status === "error",
+                      "bg-white/20": !r.live || r.status === "exited",
                     }}
                   />
                   <InlineEdit
@@ -171,14 +174,18 @@ export default function RunnerTabs(props: Props) {
                   </InlineEdit>
                 </button>
                 <button
-                  class="ml-0.5 hidden rounded p-0.5 text-white/45 hover:bg-white/10 hover:text-white group-hover:inline-flex"
+                  class="ml-0.5 hidden rounded p-0.5 text-faint transition hover:bg-white/10 hover:text-ink group-hover:inline-flex"
                   onClick={(e) => {
                     e.stopPropagation();
-                    closeRunner(r.id).catch(console.error);
+                    if (e.altKey) {
+                      deleteRunner(r.id).catch(console.error);
+                    } else {
+                      stopRunner(r.id).catch(console.error);
+                    }
                   }}
-                  title="close runner (⌘W)"
+                  title="parar (⌘W) — a sessão fica guardada. ⌥clique exclui de vez"
                 >
-                  <X size={10} />
+                  {r.live ? <Power size={10} /> : <Trash2 size={10} />}
                 </button>
               </div>
             );
@@ -186,22 +193,22 @@ export default function RunnerTabs(props: Props) {
         </For>
 
         <Show when={p().runners.length === 0}>
-          <span class="px-2 py-1 text-white/35">no runners yet —</span>
+          <span class="px-2 py-1 text-faint">nenhum runner ainda —</span>
         </Show>
       </div>
 
-      <div class="ml-1 flex items-center gap-1">
+      <div class="ml-auto flex shrink-0 items-center gap-1 pl-1">
         <div class="relative shrink-0">
           <button
-            class="flex shrink-0 items-center gap-1 rounded-md border border-white/10 px-2 py-1 text-white/75 hover:border-white/25 hover:bg-white/5 hover:text-white"
+            class="flex shrink-0 items-center gap-1 rounded-lg border border-line px-2 py-1 text-dim transition hover:border-white/25 hover:bg-white/6 hover:text-ink"
             onClick={() =>
               agentDropdownOpen() ? closeAgentDropdown() : openAgentDropdown()
             }
-            title="add agent (⌘⇧N)"
+            title="novo agente (⌘⇧N)"
           >
             <Bot size={11} />
-            <span>+ agent</span>
-            <ChevronDown size={9} class="text-white/45" />
+            <span>agente</span>
+            <ChevronDown size={9} class="opacity-50" />
           </button>
           <Show when={agentDropdownOpen()}>
             <AgentDropdown
@@ -214,15 +221,15 @@ export default function RunnerTabs(props: Props) {
         </div>
         <div class="relative shrink-0">
           <button
-            class="flex shrink-0 items-center gap-1 rounded-md border border-white/10 px-2 py-1 text-white/75 hover:border-white/25 hover:bg-white/5 hover:text-white"
+            class="flex shrink-0 items-center gap-1 rounded-lg border border-line px-2 py-1 text-dim transition hover:border-white/25 hover:bg-white/6 hover:text-ink"
             onClick={() =>
               shellDropdownOpen() ? closeShellDropdown() : openShellDropdown()
             }
-            title="add shell or script"
+            title="novo shell ou script"
           >
             <TerminalSquare size={11} />
-            <span>+ shell</span>
-            <ChevronDown size={9} class="text-white/45" />
+            <span>shell</span>
+            <ChevronDown size={9} class="opacity-50" />
           </button>
           <Show when={shellDropdownOpen()}>
             <ShellDropdown
@@ -257,23 +264,19 @@ function AgentDropdown(props: {
   return (
     <div
       data-agent-dropdown
-      class="absolute right-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-md border border-white/10 bg-[#0f1217] shadow-2xl"
+      class="cx-sheet absolute right-0 top-full z-30 mt-1.5 w-60 overflow-hidden rounded-cx border border-line bg-float shadow-2xl"
     >
-      <div class="border-b border-white/5 bg-white/[0.02] px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-white/45">
-        pick an AI CLI
+      <div class="border-b border-line bg-white/[0.02] px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-faint">
+        escolha a CLI
       </div>
       <Show
         when={props.loaded}
-        fallback={
-          <div class="px-3 py-2 text-[11px] text-white/40">scanning $PATH…</div>
-        }
+        fallback={<div class="px-3 py-2 text-[11px] text-faint">lendo $PATH…</div>}
       >
         <Show
           when={props.clis.length > 0}
           fallback={
-            <div class="px-3 py-2 text-[11px] text-white/35">
-              no presets defined
-            </div>
+            <div class="px-3 py-2 text-[11px] text-faint">nenhum preset</div>
           }
         >
           <For each={props.clis}>
@@ -281,20 +284,20 @@ function AgentDropdown(props: {
               <button
                 class="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] transition disabled:cursor-not-allowed disabled:opacity-40"
                 classList={{
-                  "text-white/85 hover:bg-white/10": cli.available,
-                  "text-white/50": !cli.available,
+                  "text-ink hover:bg-white/8": cli.available,
+                  "text-faint": !cli.available,
                 }}
                 disabled={!cli.available}
                 onClick={() => props.onPick(cli)}
-                title={cli.available ? cli.hint : `${cli.hint} — not on $PATH`}
+                title={cli.available ? cli.hint : `${cli.hint} — fora do $PATH`}
               >
-                <Bot size={11} class="shrink-0 text-white/55" />
+                <Bot size={11} class="shrink-0 opacity-60" />
                 <div class="min-w-0 flex-1">
                   <div class="font-medium">{cli.name}</div>
-                  <div class="text-[10px] text-white/35">
+                  <div class="text-[10px] text-faint">
                     {cli.hint}
                     <Show when={!cli.available}>
-                      <span class="ml-1 text-amber-300/70">· not installed</span>
+                      <span class="ml-1 text-busy">· não instalado</span>
                     </Show>
                   </div>
                 </div>
@@ -313,14 +316,8 @@ function ShellDropdown(props: {
   multiFolder: boolean;
   onClose: () => void;
   onSpawnBlank: () => void;
-  onSpawnScript: (
-    fs: FolderScripts,
-    name: string,
-    cmd: string,
-  ) => void;
+  onSpawnScript: (fs: FolderScripts, name: string, cmd: string) => void;
 }) {
-  // Click-outside to close. Document-level listener gated by a data attr so
-  // clicks inside the menu don't dismiss. Properly torn down via onCleanup.
   function onDocClick(e: MouseEvent) {
     const target = e.target as HTMLElement | null;
     if (target?.closest("[data-shell-dropdown]")) return;
@@ -332,45 +329,48 @@ function ShellDropdown(props: {
   return (
     <div
       data-shell-dropdown
-      class="absolute right-0 top-full z-30 mt-1 w-60 overflow-hidden rounded-md border border-white/10 bg-[#0f1217] shadow-2xl"
+      class="cx-sheet absolute right-0 top-full z-30 mt-1.5 max-h-80 w-64 overflow-y-auto rounded-cx border border-line bg-float shadow-2xl"
     >
       <button
-        class="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-white/85 hover:bg-white/10"
+        class="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-ink transition hover:bg-white/8"
         onClick={props.onSpawnBlank}
       >
-        <TerminalSquare size={11} class="shrink-0 text-white/55" />
+        <TerminalSquare size={11} class="shrink-0 opacity-60" />
         <div class="min-w-0 flex-1">
-          <div>shell (blank)</div>
-          <div class="text-[10px] text-white/35">interactive zsh in project cwd</div>
+          <div>shell vazio</div>
+          <div class="text-[10px] text-faint">zsh interativo na pasta do projeto</div>
         </div>
       </button>
       <Show when={props.loading}>
-        <div class="border-t border-white/5 px-3 py-2 text-[11px] text-white/40">
-          scanning package.json…
+        <div class="border-t border-line px-3 py-2 text-[11px] text-faint">
+          lendo package.json…
         </div>
       </Show>
       <Show when={!props.loading && props.folderScripts.length === 0}>
-        <div class="border-t border-white/5 px-3 py-2 text-[11px] text-white/35">
-          no package.json scripts found
+        <div class="border-t border-line px-3 py-2 text-[11px] text-faint">
+          nenhum script encontrado
         </div>
       </Show>
       <For each={props.folderScripts}>
         {(fs) => (
           <>
-            <div class="border-t border-white/5 bg-white/[0.02] px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-white/45">
-              <Show when={props.multiFolder} fallback={<>scripts ({fs.packageManager})</>}>
+            <div class="border-t border-line bg-white/[0.02] px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider text-faint">
+              <Show
+                when={props.multiFolder}
+                fallback={<>scripts ({fs.packageManager})</>}
+              >
                 {fs.basename} ({fs.packageManager})
               </Show>
             </div>
             <For each={fs.scripts}>
               {(s) => (
                 <button
-                  class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-white/85 hover:bg-white/10"
+                  class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-dim transition hover:bg-white/8 hover:text-ink"
                   onClick={() => props.onSpawnScript(fs, s.name, s.command)}
                   title={s.command}
                 >
                   <span class="min-w-0 flex-1 truncate font-medium">{s.name}</span>
-                  <span class="ml-2 max-w-[120px] truncate text-[10px] text-white/35">
+                  <span class="ml-2 max-w-[110px] truncate text-[10px] text-faint">
                     {s.command}
                   </span>
                 </button>

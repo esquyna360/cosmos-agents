@@ -13,7 +13,7 @@ export default function ProjectCard(props: Props) {
   const wide = () => props.project.runners.length > 1;
   return (
     <article
-      class="flex flex-col rounded-lg border border-white/8 bg-[#0e1116] p-3 transition hover:border-white/20"
+      class="flex flex-col rounded-lg border border-white/8 bg-float p-3 transition hover:border-white/20"
       classList={{ "md:col-span-2": wide() }}
     >
       <header class="mb-3 flex items-center gap-2">
@@ -22,10 +22,10 @@ export default function ProjectCard(props: Props) {
           status={props.project.promotedStatus}
           live={props.project.promotedLive}
         />
-        <span class="min-w-0 flex-1 truncate text-sm font-medium text-white/90">
+        <span class="min-w-0 flex-1 truncate text-sm font-medium text-ink">
           {props.project.name}
         </span>
-        <span class="text-[10px] tabular-nums text-white/35">
+        <span class="text-[10px] tabular-nums text-faint">
           {props.project.runners.length} runner
           {props.project.runners.length === 1 ? "" : "s"}
         </span>
@@ -56,8 +56,8 @@ export default function ProjectCard(props: Props) {
                   />
                 </span>
                 <span class="min-w-0 flex-1">
-                  <span class="block truncate text-white/90">{r.name}</span>
-                  <span class="block truncate text-[10px] text-white/40">
+                  <span class="block truncate text-ink">{r.name}</span>
+                  <span class="block truncate text-[10px] text-faint">
                     {statusLabel(r.status)} · {formatAge(r.lastActive)}
                   </span>
                 </span>

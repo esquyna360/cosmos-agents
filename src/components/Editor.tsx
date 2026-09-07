@@ -261,10 +261,10 @@ export default function Editor(props: Props) {
 
   return (
     <div class="flex h-full w-full">
-      <div class="flex w-64 shrink-0 flex-col overflow-hidden border-r border-white/5 bg-[#0a0c0f]">
-        <div class="flex items-center justify-between px-3 pb-2 pt-2 text-[11px] uppercase tracking-wider text-white/40">
+      <div class="flex w-64 shrink-0 flex-col overflow-hidden border-r border-line bg-void">
+        <div class="flex items-center justify-between px-3 pb-2 pt-2 text-[11px] uppercase tracking-wider text-faint">
           <span>files</span>
-          <span class="normal-case text-white/30">⌘P · ⌘⇧F</span>
+          <span class="normal-case text-faint">⌘P · ⌘⇧F</span>
         </div>
         <div class="min-h-0 flex-1 overflow-y-auto">
           <FileTree
@@ -285,18 +285,18 @@ export default function Editor(props: Props) {
         <Show
           when={activePath()}
           fallback={
-            <div class="flex flex-1 items-center justify-center text-white/30">
+            <div class="flex flex-1 items-center justify-center text-faint">
               select a file from the tree or ⌘P
             </div>
           }
         >
-          <div class="flex h-5 shrink-0 items-center justify-end gap-2 px-3 text-[10px] text-white/35">
+          <div class="flex h-5 shrink-0 items-center justify-end gap-2 px-3 text-[10px] text-faint">
             <Show when={dirty()[activePath()!]}>
               <span>{saving()[activePath()!] ? "saving…" : "modified"}</span>
             </Show>
           </div>
         </Show>
-        <div ref={host} class="min-h-0 flex-1 overflow-hidden bg-[#0b0d10]" />
+        <div ref={host} class="min-h-0 flex-1 overflow-hidden bg-void" />
       </div>
     </div>
   );

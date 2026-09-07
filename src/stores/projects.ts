@@ -7,10 +7,13 @@ import {
   projectsDelete,
   projectsList,
   projectsUpdate,
+  projectsClose,
   ptyKillProject,
   runnersCreate,
   runnersDelete,
   runnersList,
+  runnersResetSession,
+  runnersStop,
   runnersUpdate,
   type Project,
   type Runner,
@@ -18,10 +21,12 @@ import {
   type RunnerStatus,
 } from "../lib/projects";
 import {
+  ptyKill,
   ptyLiveIds,
   ptySpawn,
   type AgentStatus,
 } from "../lib/ipc";
+import { activeSlot, forgetProject, revealRunner, slotsFor } from "./panes";
 import { fsClaudeMd, fsDetectStack, type StackInfo } from "../lib/fs";
 
 /// UI-shape runner: persisted fields + live/derived status.
@@ -155,9 +160,10 @@ const [state, setState] = createStore<ProjectsState>({ list: [] });
 const [focusedProjectIdSignal, setFocusedProjectIdSignal] = createSignal<string | null>(
   null,
 );
-const [focusedRunnerIdByProject, setFocusedRunnerIdByProject] = createSignal<
-  Record<string, string>
->({});
+/// Bumped whenever a runner's PTY is respawned, so terminals keyed on it
+/// remount and re-attach instead of streaming into a dead channel.
+const [respawnTick, setRespawnTick] = createSignal(0);
+export { respawnTick };
 
 const [requestedOpenFile, setRequestedOpenFile] = createSignal<{
   path: string;
@@ -181,20 +187,37 @@ export const focusedProject = createMemo<ProjectUI | null>(
   () => state.list.find((p) => p.id === focusedProjectIdSignal()) ?? null,
 );
 
+/// The runner the composer, ⌘W and the status bar act on: whatever sits in
+/// the active pane, falling back to the project's first runner when the grid
+/// still has an empty slot selected.
 export const focusedRunner = createMemo<RunnerUI | null>(() => {
   const p = focusedProject();
   if (!p) return null;
-  const id = focusedRunnerIdByProject()[p.id];
-  return p.runners.find((r) => r.id === id) ?? p.runners[0] ?? null;
+  const slots = slotsFor(p.id);
+  const inSlot = slots[activeSlot()] ?? null;
+  return (
+    p.runners.find((r) => r.id === inSlot) ??
+    p.runners.find((r) => r.id === slots.find(Boolean)) ??
+    p.runners[0] ??
+    null
+  );
 });
 
 export function focusProject(id: string): void {
   setFocusedProjectIdSignal(id);
 }
 
+/**
+ * Selects a runner and, if its PTY is gone, brings it back. Clicking a
+ * stopped agent is the natural "resume this conversation" gesture — making
+ * the user hunt for a separate restart button would be the wrong default.
+ */
 export function focusRunner(projectId: string, runnerId: string): void {
-  setFocusedRunnerIdByProject({ ...focusedRunnerIdByProject(), [projectId]: runnerId });
   setFocusedProjectIdSignal(projectId);
+  revealRunner(projectId, runnerId);
+  const proj = state.list.find((p) => p.id === projectId);
+  const runner = proj?.runners.find((r) => r.id === runnerId);
+  if (runner && !runner.live) restartRunner(runnerId).catch(console.error);
 }
 
 export function toggleProjectCollapsed(id: string): void {
@@ -434,10 +457,7 @@ export async function createProjectWithAgent(opts: {
   ui.runners.push(runnerToUI(runner, true));
   setState("list", (list) => [ui, ...list]);
   setFocusedProjectIdSignal(project.id);
-  setFocusedRunnerIdByProject({
-    ...focusedRunnerIdByProject(),
-    [project.id]: runner.id,
-  });
+  revealRunner(project.id, runner.id);
   enrich(project.cwd).then(({ stacks, claudeMd }) => {
     setState(
       "list",
@@ -515,10 +535,7 @@ export async function createRunnerInProject(
     (rs) => [...rs, ui],
   );
   setFocusedProjectIdSignal(projectId);
-  setFocusedRunnerIdByProject({
-    ...focusedRunnerIdByProject(),
-    [projectId]: runner.id,
-  });
+  revealRunner(projectId, runner.id);
   setPendingRename(runner.id);
   return ui;
 }
@@ -551,7 +568,81 @@ export async function renameRunner(id: string, name: string): Promise<void> {
   );
 }
 
-export async function closeRunner(id: string): Promise<void> {
+/**
+ * Stops a runner: the PTY dies, the row survives. Reopening the tab respawns
+ * Claude with `--resume <session>`, so the thread picks up where it stopped.
+ * This used to delete the row outright, which is why sessions could never be
+ * revived — the handle went with it.
+ */
+export async function stopRunner(id: string): Promise<void> {
+  try {
+    await runnersStop(id);
+  } catch (e) {
+    console.error("[cosmos] runners_stop failed", e);
+  }
+  setState(
+    "list",
+    () => true,
+    "runners",
+    (r) => r.id === id,
+    (cur) => ({ ...cur, live: false, status: "exited" as RunnerStatus }),
+  );
+  recomputePromotion();
+}
+
+/** Kills and respawns a runner in place, resuming its session. */
+export async function restartRunner(id: string): Promise<void> {
+  const project = state.list.find((p) => p.runners.some((r) => r.id === id));
+  const runner = project?.runners.find((r) => r.id === id);
+  if (!project || !runner) return;
+  try {
+    await ptyKill(id);
+  } catch {
+    /* already dead */
+  }
+  setState(
+    "list",
+    (p) => p.id === project.id,
+    "runners",
+    (r) => r.id === id,
+    (cur) => ({ ...cur, live: false, status: "exited" as RunnerStatus }),
+  );
+  // Terminal remounts on the live flag flipping back and does the spawn, but
+  // a runner that is already on screen won't remount — so spawn here too and
+  // let the attach path in Terminal find a live PTY.
+  const cwd = runner.kind === "shell" ? (project.folders[0] ?? project.cwd) : project.cwd;
+  try {
+    await ptySpawn({
+      id,
+      cwd,
+      program: runner.program,
+      args: runner.args,
+      cols: 100,
+      rows: 30,
+      projectId: project.id,
+      kind: runner.kind,
+    });
+    markRunnerLive(id, true);
+    setRespawnTick(respawnTick() + 1);
+  } catch (e) {
+    console.error("[cosmos] restart spawn failed", e);
+  }
+}
+
+/** Throws away the resumable thread and restarts on a clean one. */
+export async function resetRunnerSession(id: string): Promise<void> {
+  try {
+    await runnersResetSession(id);
+  } catch (e) {
+    console.error("[cosmos] runners_reset_session failed", e);
+    return;
+  }
+  await loadProjects();
+  await restartRunner(id);
+}
+
+/** Permanently removes a runner and its row. */
+export async function deleteRunner(id: string): Promise<void> {
   const project = state.list.find((p) => p.runners.some((r) => r.id === id));
   if (!project) return;
   try {
@@ -559,30 +650,44 @@ export async function closeRunner(id: string): Promise<void> {
   } catch (e) {
     console.error("[cosmos] runners_delete failed", e);
   }
-  const remaining = project.runners.filter((r) => r.id !== id);
-  if (remaining.length === 0) {
-    // Closing the last runner of a project also closes the project, so the
-    // user doesn't end up with empty projects cluttering the sidebar.
-    await closeProject(project.id);
-    return;
-  }
   setState(
     "list",
     (p) => p.id === project.id,
     "runners",
     (rs) => rs.filter((r) => r.id !== id),
   );
-  // If the closed runner was focused, fall back to the first remaining.
-  const focused = focusedRunnerIdByProject()[project.id];
-  if (focused === id) {
-    setFocusedRunnerIdByProject({
-      ...focusedRunnerIdByProject(),
-      [project.id]: remaining[0].id,
-    });
-  }
+  recomputePromotion();
 }
 
-export async function closeProject(id: string): Promise<void> {
+/**
+ * Puts a project to sleep: every PTY stops, nothing is deleted. The project
+ * stays in the sidebar, greyed, and one click brings its agents back with
+ * their history intact.
+ */
+export async function sleepProject(id: string): Promise<void> {
+  try {
+    await projectsClose(id);
+  } catch (e) {
+    console.error("[cosmos] projects_close failed", e);
+  }
+  setState(
+    "list",
+    (p) => p.id === id,
+    (cur) => ({
+      ...cur,
+      runners: cur.runners.map((r) => ({
+        ...r,
+        live: false,
+        status: "exited" as RunnerStatus,
+      })),
+      promotedLive: false,
+      promotedStatus: "idle" as AgentStatus,
+    }),
+  );
+}
+
+/** Deletes a project and every runner under it. Irreversible. */
+export async function deleteProject(id: string): Promise<void> {
   try {
     await ptyKillProject(id);
   } catch (e) {
@@ -594,11 +699,8 @@ export async function closeProject(id: string): Promise<void> {
     console.error("[cosmos] projects_delete failed", e);
   }
   setState("list", (list) => list.filter((p) => p.id !== id));
-  // Drop derived state for the closed project.
-  const focusMap = { ...focusedRunnerIdByProject() };
-  delete focusMap[id];
-  setFocusedRunnerIdByProject(focusMap);
   fileStatesByProject.delete(id);
+  forgetProject(id);
   try {
     localStorage.removeItem(editorKey(id));
   } catch {
@@ -606,6 +708,17 @@ export async function closeProject(id: string): Promise<void> {
   }
   if (focusedProjectIdSignal() === id) {
     setFocusedProjectIdSignal(state.list[0]?.id ?? null);
+  }
+}
+
+function recomputePromotion(): void {
+  for (const proj of state.list) {
+    const promo = promoteFromRunners(proj.runners);
+    setState(
+      "list",
+      (p) => p.id === proj.id,
+      (cur) => ({ ...cur, promotedStatus: promo.status, promotedLive: promo.live }),
+    );
   }
 }
 

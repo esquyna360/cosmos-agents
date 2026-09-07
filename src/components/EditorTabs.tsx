@@ -13,7 +13,7 @@ interface Props {
 
 export default function EditorTabs(props: Props) {
   return (
-    <div class="flex h-8 shrink-0 items-center gap-px overflow-x-auto border-b border-white/5 bg-[#0a0c0f]">
+    <div class="flex h-8 shrink-0 items-center gap-px overflow-x-auto border-b border-line bg-void">
       <For each={props.paths}>
         {(path) => {
           const isActive = () => props.active === path;
@@ -21,8 +21,8 @@ export default function EditorTabs(props: Props) {
           const { Icon, color } = iconForFile(basenameOf(path));
           return (
             <div
-              class="group flex h-full shrink-0 items-center gap-1.5 border-r border-white/5 px-2 text-[12px] text-white/70 hover:bg-white/5"
-              classList={{ "bg-[#13161c] text-white": isActive() }}
+              class="group flex h-full shrink-0 items-center gap-1.5 border-r border-line px-2 text-[12px] text-dim hover:bg-white/5"
+              classList={{ "bg-raised text-white": isActive() }}
             >
               <button
                 class="flex items-center gap-1.5"
@@ -32,11 +32,11 @@ export default function EditorTabs(props: Props) {
                 <Icon size={13} class="shrink-0" style={{ color }} />
                 <span class="max-w-[200px] truncate">{basenameOf(path)}</span>
                 <Show when={isDirty()}>
-                  <span class="ml-0.5 text-[14px] leading-none text-white/60">•</span>
+                  <span class="ml-0.5 text-[14px] leading-none text-dim">•</span>
                 </Show>
               </button>
               <button
-                class="rounded p-0.5 text-white/30 opacity-0 hover:text-white group-hover:opacity-100"
+                class="rounded p-0.5 text-faint opacity-0 hover:text-ink group-hover:opacity-100"
                 classList={{ "opacity-100": isActive() }}
                 onClick={(e) => {
                   e.stopPropagation();

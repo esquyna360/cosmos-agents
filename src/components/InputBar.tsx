@@ -104,7 +104,7 @@ export default function InputBar(props: Props) {
 
   return (
     <div
-      class="flex flex-col border-t-2 border-white/10 bg-[#13161c] px-3 py-2.5"
+      class="flex flex-col border-t border-line bg-panel px-3 py-2.5"
       classList={{
         // Without expand: stay at content size (shrink-0).
         // Expanded: claim every pixel of the parent column.
@@ -121,12 +121,12 @@ export default function InputBar(props: Props) {
         }
       }}
     >
-      <div class="mb-1 flex items-center justify-between text-[10px] uppercase tracking-wider text-white/40">
-        <span>compose for {props.agentName}</span>
-        <span class="text-white/30">↵ newline · ⌘↵ send · esc shrink</span>
+      <div class="mb-1.5 flex items-center justify-between text-[10px] font-medium uppercase tracking-wider text-faint">
+        <span>escrever para {props.agentName}</span>
+        <span>↵ nova linha · ⌘↵ enviar · esc encolher</span>
       </div>
       <div
-        class="flex min-h-0 items-end gap-2 rounded-md border border-white/10 bg-[#0b0d10] px-3 py-2 focus-within:border-white/25"
+        class="flex min-h-0 items-end gap-2 rounded-cx border border-line bg-void px-3 py-2 transition focus-within:border-white/25"
         classList={{
           "flex-1": expanded(),
         }}
@@ -135,8 +135,8 @@ export default function InputBar(props: Props) {
           ref={ref}
           rows={MIN_ROWS}
           value={value()}
-          placeholder="paste or type a prompt, then ⌘↵…"
-          class="w-full resize-none bg-transparent text-[13px] leading-5 text-white/90 outline-none placeholder:text-white/30"
+          placeholder="cole ou escreva o prompt, depois ⌘↵…"
+          class="w-full resize-none bg-transparent text-[13px] leading-5 text-ink outline-none placeholder:text-faint"
           classList={{
             "min-h-[60px]": !expanded(),
             "h-full self-stretch": expanded(),
@@ -160,13 +160,13 @@ export default function InputBar(props: Props) {
         <button
           onClick={submit}
           disabled={!value() || sending()}
-          class="shrink-0 self-end rounded-md bg-white/10 px-3 py-1.5 text-[12px] font-medium text-white/90 hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-30"
-          title="Send (⌘↵)"
+          class="shrink-0 self-end rounded-lg bg-white/10 px-3 py-1.5 text-[12px] font-medium text-ink transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-30"
+          title="Enviar (⌘↵)"
           // Prevent the button from stealing focus before the click resolves,
           // which would otherwise collapse the composer mid-submit.
           onMouseDown={(e) => e.preventDefault()}
         >
-          send ⌘↵
+          enviar ⌘↵
         </button>
       </div>
     </div>

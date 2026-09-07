@@ -51,15 +51,15 @@ export default function UpdateBanner() {
   return (
     <Show when={!dismissed() && phase() !== "idle" && update()}>
       <div
-        class="pointer-events-auto fixed bottom-4 right-4 z-50 flex w-80 flex-col gap-2 rounded-lg border border-white/10 bg-[#13161b]/95 p-3 text-xs text-white/90 shadow-xl backdrop-blur"
+        class="pointer-events-auto fixed bottom-4 right-4 z-50 flex w-80 flex-col gap-2 rounded-lg border border-line bg-[#13161b]/95 p-3 text-xs text-ink shadow-xl backdrop-blur"
         data-no-drag
       >
         <div class="flex items-center justify-between">
-          <span class="text-[10px] font-semibold uppercase tracking-wider text-white/45">
+          <span class="text-[10px] font-semibold uppercase tracking-wider text-faint">
             Cosmos update
           </span>
           <button
-            class="text-white/40 hover:text-white"
+            class="text-faint hover:text-ink"
             onClick={() => setDismissed(true)}
             title="dismiss"
           >
@@ -68,11 +68,11 @@ export default function UpdateBanner() {
         </div>
 
         <Show when={phase() === "available"}>
-          <div class="text-white/80">
+          <div class="text-dim">
             Versão <b>{update()?.version}</b> disponível.
           </div>
           <Show when={update()?.body}>
-            <pre class="max-h-24 overflow-auto whitespace-pre-wrap rounded bg-black/30 p-2 text-[10px] text-white/60">
+            <pre class="max-h-24 overflow-auto whitespace-pre-wrap rounded bg-black/30 p-2 text-[10px] text-dim">
               {update()?.body}
             </pre>
           </Show>
@@ -86,7 +86,7 @@ export default function UpdateBanner() {
         </Show>
 
         <Show when={phase() === "downloading"}>
-          <div class="text-white/70">Baixando v{update()?.version}…</div>
+          <div class="text-dim">Baixando v{update()?.version}…</div>
           <div class="h-1.5 overflow-hidden rounded bg-white/10">
             <div
               class="h-full bg-white/60 transition-[width]"
@@ -101,7 +101,7 @@ export default function UpdateBanner() {
         </Show>
 
         <Show when={phase() === "installed"}>
-          <div class="text-white/70">Instalado. Reiniciando…</div>
+          <div class="text-dim">Instalado. Reiniciando…</div>
         </Show>
 
         <Show when={phase() === "error"}>

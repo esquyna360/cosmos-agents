@@ -31,6 +31,8 @@ export interface Runner {
   withStatusFsm: boolean;
   createdAt: number;
   lastActive: number;
+  /// Claude session UUID this runner resumes into. Empty for shells.
+  sessionId: string;
 }
 
 interface ProjectSnake {
@@ -54,6 +56,7 @@ interface RunnerSnake {
   with_status_fsm: boolean;
   created_at: number;
   last_active: number;
+  session_id: string;
 }
 
 function projectFromSnake(r: ProjectSnake): Project {
@@ -80,6 +83,7 @@ function runnerFromSnake(r: RunnerSnake): Runner {
     withStatusFsm: r.with_status_fsm,
     createdAt: r.created_at,
     lastActive: r.last_active,
+    sessionId: r.session_id ?? "",
   };
 }
 
@@ -139,8 +143,25 @@ export function runnersUpdate(id: string, name: string): Promise<void> {
   return invoke("runners_update", { id, name });
 }
 
+/// Removes the runner row for good. Only reachable behind an explicit
+/// confirm — the close button stops instead.
 export function runnersDelete(id: string): Promise<void> {
   return invoke("runners_delete", { id });
+}
+
+/// Kills the PTY, keeps the row. The conversation stays resumable.
+export function runnersStop(id: string): Promise<void> {
+  return invoke("runners_stop", { id });
+}
+
+/// Mints a fresh session handle so the next spawn starts a clean thread.
+export function runnersResetSession(id: string): Promise<void> {
+  return invoke("runners_reset_session", { id });
+}
+
+/// Stops every runner in a project without deleting anything.
+export function projectsClose(id: string): Promise<void> {
+  return invoke("projects_close", { id });
 }
 
 export function ptyKillProject(projectId: string): Promise<void> {

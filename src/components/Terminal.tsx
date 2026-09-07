@@ -32,14 +32,31 @@ export default function Terminal(props: Props) {
       fontSize: 13,
       lineHeight: 1.2,
       theme: {
-        background: "#0b0d10",
-        foreground: "#e6e6e6",
-        cursor: "#e6e6e6",
-        selectionBackground: "#3a3f4b",
+        background: "#0a0c11",
+        foreground: "#e9ecf1",
+        cursor: "#7aa2ff",
+        cursorAccent: "#0a0c11",
+        selectionBackground: "rgba(122, 162, 255, 0.28)",
+        black: "#0a0c11",
+        red: "#fb7185",
+        green: "#34d399",
+        yellow: "#fbbf24",
+        blue: "#7aa2ff",
+        magenta: "#c4a2ff",
+        cyan: "#5eead4",
+        white: "#d5dae3",
+        brightBlack: "#626b7b",
+        brightRed: "#fda4af",
+        brightGreen: "#6ee7b7",
+        brightYellow: "#fcd34d",
+        brightBlue: "#a3c0ff",
+        brightMagenta: "#ddc9ff",
+        brightCyan: "#99f6e4",
+        brightWhite: "#f4f6f9",
       },
       cursorBlink: true,
       allowProposedApi: true,
-      scrollback: 10_000,
+      scrollback: 20_000,
     });
 
     const fit = new FitAddon();
@@ -95,11 +112,12 @@ export default function Terminal(props: Props) {
       await ptyAttach(id, onChunk);
       await ptyResize(id, term.cols, term.rows).catch(() => {});
     } catch {
-      // Runner has no live PTY (likely restored from SQLite). Spawn one
-      // in-place using the runner's persisted program/args — NOT a hardcoded
-      // claude command. This is the subtle revive bug we explicitly guard
-      // against: a kind='shell' runner restored after restart must come back
-      // as a shell, not Claude.
+      // Runner has no live PTY (restored from SQLite after a restart, or
+      // stopped from the UI). Spawn one in-place using the runner's persisted
+      // program/args — NOT a hardcoded claude command, so a kind='shell'
+      // runner comes back as a shell. The backend folds `--resume <session>`
+      // into the command when a transcript for this runner already exists, so
+      // an agent picks its conversation up where it left off.
       try {
         await ptySpawn({
           id,
@@ -132,5 +150,5 @@ export default function Terminal(props: Props) {
     });
   });
 
-  return <div ref={host} class="min-h-0 min-w-0 flex-1 p-2" />;
+  return <div ref={host} class="min-h-0 min-w-0 flex-1 px-2.5 py-1.5" />;
 }

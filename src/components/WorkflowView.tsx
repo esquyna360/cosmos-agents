@@ -32,16 +32,16 @@ export default function WorkflowView() {
     setWorkflowOpen(false);
   }
   return (
-    <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-[#0b0d10] p-4">
+    <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-void p-4">
       <div class="mb-4 flex items-center justify-between">
         <div>
-          <h1 class="text-base font-medium text-white/90">workflow</h1>
-          <p class="text-[11px] text-white/40">
+          <h1 class="text-base font-medium text-ink">workflow</h1>
+          <p class="text-[11px] text-faint">
             projects and runners · ⌘D or Esc to close
           </p>
         </div>
         <button
-          class="rounded border border-white/10 px-2 py-1 text-[12px] text-white/60 hover:bg-white/5 hover:text-white"
+          class="rounded border border-line px-2 py-1 text-[12px] text-dim hover:bg-white/5 hover:text-ink"
           onClick={() => setWorkflowOpen(false)}
         >
           close
@@ -50,7 +50,7 @@ export default function WorkflowView() {
       <Show
         when={projectsStore.list.length > 0}
         fallback={
-          <div class="flex flex-1 items-center justify-center text-white/30">
+          <div class="flex flex-1 items-center justify-center text-faint">
             no projects — ⌘T to spawn
           </div>
         }

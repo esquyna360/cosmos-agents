@@ -1,20 +1,31 @@
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { Globe, Settings2, X } from "lucide-solid";
+import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import {
+  Bot,
+  ChevronRight,
+  Globe,
+  Plus,
+  Power,
+  Search,
+  Settings2,
+  TerminalSquare,
+} from "lucide-solid";
 
 import {
-  closeProject,
   focusProject,
   focusedProjectId,
   projectsStore,
+  sleepProject,
+  updateProject,
   type ProjectUI,
+  type RunnerUI,
 } from "../stores/projects";
+import { focusRunner } from "../stores/projects";
 import { openCreator } from "../stores/creator";
 import { sidebarWidthPx, setSidebarWidthPx } from "../stores/layout";
+import { activeSlot, slotsFor } from "../stores/panes";
 import { colorForPath } from "../lib/colorHash";
-import StatusDot from "./StatusDot";
 import InlineEdit from "./InlineEdit";
 import { webInfo, type WebInfo } from "../lib/remote";
-import { updateProject } from "../stores/projects";
 
 function basename(p: string): string {
   const t = p.replace(/\/+$/, "");
@@ -23,37 +34,245 @@ function basename(p: string): string {
 }
 
 export default function Sidebar() {
+  const [query, setQuery] = createSignal("");
+  const [collapsed, setCollapsed] = createSignal<Record<string, boolean>>(
+    readCollapsed(),
+  );
+
+  const matches = createMemo(() => {
+    const q = query().trim().toLowerCase();
+    if (!q) return projectsStore.list;
+    return projectsStore.list.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.folders.some((f) => f.toLowerCase().includes(q)) ||
+        p.runners.some((r) => r.name.toLowerCase().includes(q)),
+    );
+  });
+
+  function toggle(id: string) {
+    const next = { ...collapsed(), [id]: !collapsed()[id] };
+    setCollapsed(next);
+    writeCollapsed(next);
+  }
+
   return (
     <aside
-      class="relative flex h-full shrink-0 flex-col border-r border-white/5 bg-[#0a0c0f]"
+      class="relative flex h-full shrink-0 flex-col border-r border-line bg-void"
       style={{ width: `${sidebarWidthPx()}px` }}
     >
-      <div class="flex items-center justify-between px-3 pb-1 pt-3">
-        <span class="text-[10px] font-medium uppercase tracking-wider text-white/45">
-          projects
-        </span>
+      <div class="flex items-center gap-1.5 px-2.5 pb-2 pt-2.5">
+        <div class="relative min-w-0 flex-1">
+          <Search
+            size={11}
+            class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-faint"
+          />
+          <input
+            class="w-full rounded-lg border border-line bg-white/[0.03] py-1 pl-6 pr-2 text-[11.5px] text-ink outline-none transition placeholder:text-faint focus:border-white/20 focus:bg-white/[0.05]"
+            placeholder="filtrar"
+            value={query()}
+            onInput={(e) => setQuery(e.currentTarget.value)}
+          />
+        </div>
         <button
-          class="flex items-center gap-1 rounded border border-white/10 px-2 py-0.5 text-[11px] text-white/70 hover:border-white/25 hover:bg-white/10 hover:text-white"
+          class="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-lg border border-line text-dim transition hover:border-white/25 hover:bg-white/6 hover:text-ink"
           onClick={() => openCreator({ mode: "project" })}
-          title="new project (⌘T)"
+          title="novo projeto (⌘T)"
         >
-          <span class="leading-none">+</span>
-          <span>new</span>
+          <Plus size={13} />
         </button>
       </div>
-      <ul class="min-h-0 flex-1 overflow-y-auto px-2 pt-1">
-        <For each={projectsStore.list}>
-          {(p) => <ProjectRow project={p} />}
+
+      <ul class="min-h-0 flex-1 space-y-px overflow-y-auto px-1.5 pb-2">
+        <For each={matches()}>
+          {(p) => (
+            <ProjectRow
+              project={p}
+              collapsed={!!collapsed()[p.id]}
+              onToggle={() => toggle(p.id)}
+            />
+          )}
         </For>
+        <Show when={matches().length === 0}>
+          <li class="px-2 py-6 text-center text-[11px] text-faint">
+            nada com “{query()}”
+          </li>
+        </Show>
       </ul>
+
       <RemoteLink />
-      <div class="border-t border-white/5 px-3 py-2 text-[10px] leading-relaxed text-white/30">
-        ⌘T new · ⌘⇧N agent · ⌘W close runner · ⌘⇧W close project<br />
-        ⌘E view · ⌘I composer · ⌘D workflow<br />
-        ⌘\ pin · ⌘P file · ⌘⇧F search · ⌘1–9 focus
-      </div>
+      <Shortcuts />
       <ResizeHandle />
     </aside>
+  );
+}
+
+function ProjectRow(props: {
+  project: ProjectUI;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  const p = () => props.project;
+  const isFocused = () => focusedProjectId() === p().id;
+  const isMulti = () => p().folders.length > 1;
+  const folderHint = () => {
+    if (isMulti()) return `${p().folders.length} pastas`;
+    const folder = basename(p().folders[0] ?? p().cwd);
+    return p().name !== folder ? folder : null;
+  };
+  const liveCount = () => p().runners.filter((r) => r.live).length;
+
+  return (
+    <li>
+      <div
+        class="group flex items-center gap-1 rounded-lg px-1.5 py-1.5 transition"
+        classList={{
+          "bg-white/[0.07]": isFocused(),
+          "hover:bg-white/[0.04]": !isFocused(),
+        }}
+      >
+        <button
+          class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-faint transition hover:text-ink"
+          onClick={props.onToggle}
+          title={props.collapsed ? "expandir" : "recolher"}
+        >
+          <ChevronRight
+            size={11}
+            class="transition-transform"
+            style={{ transform: props.collapsed ? "none" : "rotate(90deg)" }}
+          />
+        </button>
+        <button
+          class="flex min-w-0 flex-1 items-center gap-2 text-left"
+          onClick={() => focusProject(p().id)}
+          title={[p().cwd, "", ...p().folders].join("\n")}
+        >
+          <span
+            class="h-1.5 w-1.5 shrink-0 rounded-full transition"
+            style={{
+              "background-color": colorForPath(p().cwd),
+              opacity: liveCount() > 0 ? 1 : 0.3,
+              "box-shadow":
+                liveCount() > 0
+                  ? `0 0 7px ${colorForPath(p().cwd)}`
+                  : "none",
+            }}
+          />
+          <span class="min-w-0 flex-1 truncate">
+            <InlineEdit
+              value={p().name}
+              onCommit={(next) => {
+                const trimmed = next.trim();
+                if (!trimmed || trimmed === p().name) return;
+                updateProject(p().id, trimmed, p().folders, p().memory).catch(
+                  console.error,
+                );
+              }}
+            >
+              {(name) => (
+                <span class="flex min-w-0 items-baseline gap-1.5 truncate">
+                  <span
+                    class="truncate text-[12.5px] font-medium"
+                    classList={{
+                      "text-ink": isFocused() || liveCount() > 0,
+                      "text-dim": !isFocused() && liveCount() === 0,
+                    }}
+                  >
+                    {name}
+                  </span>
+                  <Show when={folderHint()}>
+                    <span class="shrink-0 truncate text-[10px] font-normal text-faint">
+                      {folderHint()}
+                    </span>
+                  </Show>
+                </span>
+              )}
+            </InlineEdit>
+          </span>
+        </button>
+        <button
+          class="hidden shrink-0 rounded p-1 text-faint transition hover:bg-white/10 hover:text-ink group-hover:inline-flex"
+          onClick={(e) => {
+            e.stopPropagation();
+            openCreator({ mode: "project", editingProjectId: p().id });
+          }}
+          title="editar projeto"
+        >
+          <Settings2 size={11} />
+        </button>
+        <Show when={liveCount() > 0}>
+          <button
+            class="hidden shrink-0 rounded p-1 text-faint transition hover:bg-white/10 hover:text-ink group-hover:inline-flex"
+            onClick={(e) => {
+              e.stopPropagation();
+              sleepProject(p().id).catch(console.error);
+            }}
+            title="parar os runners — nada é apagado"
+          >
+            <Power size={11} />
+          </button>
+        </Show>
+      </div>
+
+      <Show when={!props.collapsed && p().runners.length > 0}>
+        <ul class="mb-0.5 ml-[13px] border-l border-line pl-1.5">
+          <For each={p().runners}>
+            {(r) => <RunnerRow project={p()} runner={r} />}
+          </For>
+        </ul>
+      </Show>
+    </li>
+  );
+}
+
+function RunnerRow(props: { project: ProjectUI; runner: RunnerUI }) {
+  const r = () => props.runner;
+  const onScreen = () =>
+    slotsFor(props.project.id).includes(r().id) &&
+    focusedProjectId() === props.project.id;
+  const inActiveSlot = () =>
+    focusedProjectId() === props.project.id &&
+    slotsFor(props.project.id)[activeSlot()] === r().id;
+
+  return (
+    <li>
+      <button
+        class="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-[11.5px] transition"
+        classList={{
+          "bg-white/8 text-ink": inActiveSlot(),
+          "text-dim hover:bg-white/[0.04] hover:text-ink": !inActiveSlot(),
+        }}
+        onClick={() => focusRunner(props.project.id, r().id)}
+        title={
+          r().live
+            ? `${r().kind} · ${r().name}`
+            : `${r().name} — parado. clique para retomar a sessão`
+        }
+      >
+        <span class="shrink-0 opacity-50">
+          {r().kind === "shell" ? (
+            <TerminalSquare size={10} />
+          ) : (
+            <Bot size={10} />
+          )}
+        </span>
+        <span
+          class="h-1 w-1 shrink-0 rounded-full"
+          classList={{
+            "bg-live": r().live && r().status === "idle",
+            "bg-busy cx-pulse":
+              r().live && (r().status === "streaming" || r().status === "tool_running"),
+            "bg-alert cx-pulse": r().status === "awaiting_input",
+            "bg-alert": r().status === "error",
+            "bg-white/20": !r().live || r().status === "exited",
+          }}
+        />
+        <span class="min-w-0 flex-1 truncate">{r().name}</span>
+        <Show when={onScreen()}>
+          <span class="h-1 w-1 shrink-0 rounded-full bg-accent" title="no grid" />
+        </Show>
+      </button>
+    </li>
   );
 }
 
@@ -76,9 +295,9 @@ function RemoteLink() {
 
   return (
     <button
-      class="flex items-center gap-2 border-t border-white/5 px-3 py-2 text-left text-[11px] text-white/45 hover:bg-white/5 hover:text-white/80"
+      class="flex items-center gap-2 border-t border-line px-3 py-2 text-left text-[11px] text-faint transition hover:bg-white/[0.04] hover:text-dim"
       disabled={!link()}
-      title={link() ?? "web UI off"}
+      title={link() ?? "web UI desligada"}
       onClick={() => {
         const url = link();
         if (!url) return;
@@ -88,7 +307,7 @@ function RemoteLink() {
         });
       }}
     >
-      <Globe size={12} class={online() ? "text-emerald-400/80" : "text-white/30"} />
+      <Globe size={12} class={online() ? "text-live" : "text-faint"} />
       <span class="min-w-0 flex-1 truncate">
         {copied()
           ? "link copiado"
@@ -102,92 +321,14 @@ function RemoteLink() {
   );
 }
 
-function ProjectRow(props: { project: ProjectUI }) {
-  const p = props.project;
-  const isActive = () => focusedProjectId() === p.id;
-  const isMulti = () => p.folders.length > 1;
-  const folderHint = () => {
-    if (isMulti()) return null;
-    const folder = basename(p.cwd);
-    return p.name !== folder ? folder : null;
-  };
-  const tooltip = () => {
-    const lines = [p.cwd];
-    if (isMulti()) {
-      lines.push("");
-      lines.push("folders:");
-      for (const f of p.folders) lines.push(`  ${f}`);
-    }
-    if (p.runners.length > 0) {
-      lines.push("");
-      lines.push("runners:");
-      for (const r of p.runners) lines.push(`  ${r.kind} · ${r.name}`);
-    }
-    return lines.join("\n");
-  };
+function Shortcuts() {
   return (
-    <li
-      class="group flex items-center gap-1.5 rounded px-2 py-1.5 text-sm hover:bg-white/5"
-      classList={{ "bg-white/10": isActive() }}
-    >
-      <button
-        class="flex min-w-0 flex-1 items-center gap-2 text-left"
-        onClick={() => focusProject(p.id)}
-        title={tooltip()}
-      >
-        <StatusDot
-          color={colorForPath(p.cwd)}
-          status={p.promotedStatus}
-          live={p.promotedLive}
-        />
-        <span class="min-w-0 flex-1 truncate">
-          <InlineEdit
-            value={p.name}
-            onCommit={(next) => {
-              const trimmed = next.trim();
-              if (!trimmed || trimmed === p.name) return;
-              updateProject(p.id, trimmed, p.folders, p.memory).catch(console.error);
-            }}
-          >
-            {(name) => (
-              <span class="flex min-w-0 items-baseline gap-1.5 truncate">
-                <span class="truncate font-medium">{name}</span>
-                <Show when={folderHint()}>
-                  <span class="shrink-0 truncate text-[10px] font-normal text-white/30">
-                    {folderHint()}
-                  </span>
-                </Show>
-              </span>
-            )}
-          </InlineEdit>
-        </span>
-        <Show when={p.runners.length > 0}>
-          <span class="shrink-0 text-[10px] tabular-nums text-white/35">
-            {p.runners.length}
-          </span>
-        </Show>
-      </button>
-      <button
-        class="hidden shrink-0 rounded p-1 text-white/35 hover:bg-white/10 hover:text-white group-hover:inline-flex"
-        onClick={(e) => {
-          e.stopPropagation();
-          openCreator({ mode: "project", editingProjectId: p.id });
-        }}
-        title="edit project"
-      >
-        <Settings2 size={11} />
-      </button>
-      <button
-        class="hidden shrink-0 rounded p-1 text-white/35 hover:bg-white/10 hover:text-white/90 group-hover:inline-flex"
-        onClick={(e) => {
-          e.stopPropagation();
-          closeProject(p.id).catch(console.error);
-        }}
-        title="close project (⌘⇧W)"
-      >
-        <X size={11} />
-      </button>
-    </li>
+    <div class="overflow-hidden border-t border-line px-3 py-2 text-[10px] leading-[1.6] text-faint">
+      <div class="truncate">⌘T projeto · ⌘⇧N agente · ⌘W parar</div>
+      <div class="truncate">⌘⌥1–5 layout · ⌃1–4 painel · ⌘\ dividir</div>
+      <div class="truncate">⌘E view · ⌘P arquivo · ⌘⇧F buscar</div>
+      <div class="truncate">⌘B barra · ⌘I compor · ⌘1–9 projeto</div>
+    </div>
   );
 }
 
@@ -210,9 +351,29 @@ function ResizeHandle() {
   }
   return (
     <div
-      class="absolute right-0 top-0 h-full w-1.5 cursor-col-resize bg-transparent transition hover:bg-white/15"
+      class="absolute right-0 top-0 h-full w-1.5 cursor-col-resize bg-transparent transition hover:bg-white/12"
       onMouseDown={onMouseDown}
-      title="drag to resize"
+      title="arraste para redimensionar"
     />
   );
+}
+
+/* ------------------------------ persistence ------------------------------ */
+
+const KEY_COLLAPSED = "cosmos.sidebar.collapsed.v3";
+
+function readCollapsed(): Record<string, boolean> {
+  try {
+    return JSON.parse(localStorage.getItem(KEY_COLLAPSED) || "{}") ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function writeCollapsed(v: Record<string, boolean>): void {
+  try {
+    localStorage.setItem(KEY_COLLAPSED, JSON.stringify(v));
+  } catch {
+    /* ignore */
+  }
 }

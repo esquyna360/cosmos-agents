@@ -72,13 +72,13 @@ export default function DiffView(props: Props) {
   };
 
   return (
-    <div class="flex min-h-0 min-w-0 flex-1 flex-col bg-[#0b0d10]">
-      <div class="flex h-7 shrink-0 items-center justify-between border-b border-white/5 px-3 text-[11px] text-white/40">
+    <div class="flex min-h-0 min-w-0 flex-1 flex-col bg-void">
+      <div class="flex h-7 shrink-0 items-center justify-between border-b border-line px-3 text-[11px] text-faint">
         <span class="truncate">
           git diff · {props.roots.length === 1 ? props.roots[0] : `${props.roots.length} roots`}
         </span>
         <button
-          class="rounded px-2 py-0.5 text-white/60 hover:bg-white/10 hover:text-white"
+          class="rounded px-2 py-0.5 text-dim hover:bg-white/10 hover:text-ink"
           onClick={() => bumpReload(reloadToken() + 1)}
           title="refresh"
         >
@@ -88,7 +88,7 @@ export default function DiffView(props: Props) {
       <Show
         when={diffs()}
         fallback={
-          <div class="flex flex-1 items-center justify-center text-white/30">
+          <div class="flex flex-1 items-center justify-center text-faint">
             loading diff…
           </div>
         }
@@ -96,9 +96,9 @@ export default function DiffView(props: Props) {
         <Show
           when={!allFailed() && combinedDoc() !== null}
           fallback={
-            <div class="flex flex-1 items-center justify-center p-6 text-center text-white/40">
+            <div class="flex flex-1 items-center justify-center p-6 text-center text-faint">
               <div>
-                <p class="mb-2 text-sm text-white/60">no diff available</p>
+                <p class="mb-2 text-sm text-dim">no diff available</p>
                 <p class="text-[11px]">
                   {diffs()?.find((d) => !d.ok)?.text ?? "none of the roots are git repositories"}
                 </p>

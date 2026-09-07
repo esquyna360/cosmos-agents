@@ -161,17 +161,17 @@ export default function CommandPalette(props: Props) {
         if (e.target === e.currentTarget) props.onClose();
       }}
     >
-      <div class="mt-20 w-[640px] max-w-[90vw] overflow-hidden rounded-lg border border-white/10 bg-[#0e1116] shadow-2xl">
-        <div class="flex items-center gap-2 border-b border-white/5 px-3 py-2 text-xs uppercase tracking-wider text-white/40">
+      <div class="mt-20 w-[640px] max-w-[90vw] overflow-hidden rounded-lg border border-line bg-float shadow-2xl">
+        <div class="flex items-center gap-2 border-b border-line px-3 py-2 text-xs uppercase tracking-wider text-faint">
           {props.mode === "files" ? "find file" : "search in files"}
           <Show when={showRootLabel()}>
-            <span class="text-white/30">· {props.roots.length} roots</span>
+            <span class="text-faint">· {props.roots.length} roots</span>
           </Show>
-          <span class="ml-auto text-white/30">esc to close</span>
+          <span class="ml-auto text-faint">esc to close</span>
         </div>
         <input
           ref={inputRef}
-          class="w-full bg-transparent px-3 py-2.5 text-sm text-white outline-none placeholder:text-white/30"
+          class="w-full bg-transparent px-3 py-2.5 text-sm text-white outline-none placeholder:text-faint"
           placeholder={
             props.mode === "files"
               ? "filename fragment…"
@@ -180,7 +180,7 @@ export default function CommandPalette(props: Props) {
           value={query()}
           onInput={(e) => setQuery(e.currentTarget.value)}
         />
-        <ul class="max-h-[420px] overflow-y-auto border-t border-white/5">
+        <ul class="max-h-[420px] overflow-y-auto border-t border-line">
           <Show when={props.mode === "files"}>
             <For each={filteredFiles()}>
               {(f, i) => (
@@ -191,10 +191,10 @@ export default function CommandPalette(props: Props) {
                     onMouseEnter={() => setCursor(i())}
                     onClick={pickCurrent}
                   >
-                    <span class="truncate text-white/90">{basename(f.rel)}</span>
-                    <span class="ml-auto truncate text-[11px] text-white/40">
+                    <span class="truncate text-ink">{basename(f.rel)}</span>
+                    <span class="ml-auto truncate text-[11px] text-faint">
                       <Show when={showRootLabel()}>
-                        <span class="text-white/55">{basename(f.root)}/</span>
+                        <span class="text-dim">{basename(f.root)}/</span>
                       </Show>
                       {dirname(f.rel)}
                     </span>
@@ -213,13 +213,13 @@ export default function CommandPalette(props: Props) {
                     onMouseEnter={() => setCursor(i())}
                     onClick={pickCurrent}
                   >
-                    <span class="text-[11px] text-white/40">
+                    <span class="text-[11px] text-faint">
                       <Show when={showRootLabel()}>
-                        <span class="text-white/55">{basename(m.root)}/</span>
+                        <span class="text-dim">{basename(m.root)}/</span>
                       </Show>
                       {m.path}:{m.line}
                     </span>
-                    <span class="line-clamp-1 w-full truncate text-white/85">
+                    <span class="line-clamp-1 w-full truncate text-ink">
                       {m.text}
                     </span>
                   </button>
@@ -228,10 +228,10 @@ export default function CommandPalette(props: Props) {
             </For>
           </Show>
           <Show when={total() === 0 && query().length > 0}>
-            <li class="px-3 py-3 text-sm text-white/40">no matches</li>
+            <li class="px-3 py-3 text-sm text-faint">no matches</li>
           </Show>
           <Show when={props.mode === "grep" && query().length === 1}>
-            <li class="px-3 py-3 text-sm text-white/40">type 2+ characters</li>
+            <li class="px-3 py-3 text-sm text-faint">type 2+ characters</li>
           </Show>
         </ul>
       </div>

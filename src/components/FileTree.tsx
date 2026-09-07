@@ -20,7 +20,7 @@ const ICON_SIZE = 14;
 
 export default function FileTree(props: Props) {
   return (
-    <div class="flex flex-col overflow-y-auto px-1 py-1 text-[13px] leading-6 text-white/80">
+    <div class="flex flex-col overflow-y-auto px-1 py-1 text-[13px] leading-6 text-dim">
       <Show
         when={props.roots.length > 1}
         fallback={
@@ -239,7 +239,7 @@ function RowButton(props: {
 }) {
   return (
     <button
-      class="flex w-full items-center gap-1.5 truncate rounded px-1 text-left text-white/75 hover:bg-white/5 hover:text-white"
+      class="flex w-full items-center gap-1.5 truncate rounded px-1 text-left text-dim hover:bg-white/5 hover:text-ink"
       classList={{ "bg-white/10 text-white": props.selected }}
       style={{ "padding-left": `${props.depth * 12 + 4}px` }}
       onClick={props.onClick}

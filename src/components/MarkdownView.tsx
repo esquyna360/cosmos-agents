@@ -23,7 +23,7 @@ export default function MarkdownView(props: Props) {
   const html = createMemo(() => marked.parse(props.source ?? "") as string);
   return (
     <div
-      class={`cosmos-prose text-[13px] leading-relaxed text-white/85 ${props.class ?? ""}`}
+      class={`cosmos-prose text-[13px] leading-relaxed text-ink ${props.class ?? ""}`}
       // eslint-disable-next-line solid/no-innerhtml
       innerHTML={html()}
     />

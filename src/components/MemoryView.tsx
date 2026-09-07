@@ -132,7 +132,7 @@ export default function MemoryView(props: Props) {
         onSetSearch={setSearch}
         onNew={onNew}
       />
-      <div class="min-h-0 min-w-0 flex-1 border-l border-white/5">
+      <div class="min-h-0 min-w-0 flex-1 border-l border-line">
         <Show
           when={selectedId()}
           fallback={
@@ -171,7 +171,7 @@ function CardList(props: {
   onNew: () => void;
 }) {
   return (
-    <aside class="flex w-[320px] shrink-0 flex-col bg-[#0a0c0f]">
+    <aside class="flex w-[320px] shrink-0 flex-col bg-void">
       <div class="flex shrink-0 items-center gap-2 px-3 py-2">
         <button
           class="flex shrink-0 items-center gap-1.5 rounded-md bg-white/10 px-2.5 py-1 text-[12px] text-white hover:bg-white/15"
@@ -184,10 +184,10 @@ function CardList(props: {
         <div class="relative min-w-0 flex-1">
           <Search
             size={11}
-            class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-white/30"
+            class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-faint"
           />
           <input
-            class="w-full rounded-md border border-white/10 bg-black/30 py-1 pl-6 pr-2 text-[12px] text-white outline-none placeholder:text-white/30 focus:border-white/25"
+            class="w-full rounded-lg border border-line bg-black/30 py-1 pl-6 pr-2 text-[12px] text-white outline-none placeholder:text-faint focus:border-white/25"
             placeholder="search"
             value={props.search}
             onInput={(e) => props.onSetSearch(e.currentTarget.value)}
@@ -219,7 +219,7 @@ function CardList(props: {
         <Show
           when={props.cards.length > 0}
           fallback={
-            <li class="rounded-md border border-dashed border-white/10 px-3 py-4 text-center text-[11px] text-white/35">
+            <li class="rounded-md border border-dashed border-line px-3 py-4 text-center text-[11px] text-faint">
               {props.totalCount === 0
                 ? "no cards yet — hit + to add one"
                 : "no matches"}
@@ -253,7 +253,7 @@ function KindPill(props: {
       class="flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] transition"
       classList={{
         "border-white/30 bg-white/15 text-white": props.active,
-        "border-white/10 text-white/55 hover:border-white/20 hover:text-white":
+        "border-line text-dim hover:border-white/20 hover:text-ink":
           !props.active,
       }}
       onClick={props.onClick}
@@ -263,7 +263,7 @@ function KindPill(props: {
       </Show>
       <span>{props.label}</span>
       <Show when={typeof props.count === "number"}>
-        <span class="text-white/35">·{props.count}</span>
+        <span class="text-faint">·{props.count}</span>
       </Show>
     </button>
   );
@@ -297,7 +297,7 @@ function CardRow(props: {
           <span class={`shrink-0 ${accent().icon}`}>
             <Dynamic component={KIND_ICON(props.card.kind)} size={11} />
           </span>
-          <span class="min-w-0 flex-1 truncate text-[12.5px] font-medium text-white/90">
+          <span class="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink">
             {props.card.title || "untitled"}
           </span>
           <Show when={props.card.pinned}>
@@ -305,7 +305,7 @@ function CardRow(props: {
           </Show>
         </div>
         <Show when={preview()}>
-          <p class="line-clamp-2 text-[11px] leading-snug text-white/45">
+          <p class="line-clamp-2 text-[11px] leading-snug text-faint">
             {preview()}
           </p>
         </Show>
@@ -313,7 +313,7 @@ function CardRow(props: {
           <div class="flex flex-wrap gap-1">
             <For each={props.card.tags.slice(0, 4)}>
               {(t) => (
-                <span class="rounded-full bg-white/[0.06] px-1.5 py-[1px] text-[9.5px] text-white/55">
+                <span class="rounded-full bg-white/[0.06] px-1.5 py-[1px] text-[9.5px] text-dim">
                   #{t}
                 </span>
               )}
@@ -335,7 +335,7 @@ function kindAccent(kind: MemoryKind): { border: string; icon: string } {
       return { border: "border-emerald-400/15", icon: "text-emerald-300/85" };
     case "note":
     default:
-      return { border: "border-white/10", icon: "text-white/55" };
+      return { border: "border-line", icon: "text-dim" };
   }
 }
 
@@ -420,9 +420,9 @@ function CardDetail(props: {
   return (
     <div class="flex h-full flex-col">
       {/* Toolbar */}
-      <div class="flex shrink-0 items-center gap-2 border-b border-white/5 px-4 py-2">
+      <div class="flex shrink-0 items-center gap-2 border-b border-line px-4 py-2">
         <input
-          class="min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-[14px] font-medium text-white outline-none placeholder:text-white/35 hover:bg-white/[0.04] focus:bg-white/[0.06]"
+          class="min-w-0 flex-1 rounded-md bg-transparent px-2 py-1 text-[14px] font-medium text-white outline-none placeholder:text-faint hover:bg-white/[0.04] focus:bg-white/[0.06]"
           placeholder="untitled"
           value={title()}
           onInput={(e) => {
@@ -431,7 +431,7 @@ function CardDetail(props: {
           }}
           onBlur={() => commitImmediate({})}
         />
-        <div class="flex shrink-0 items-center gap-0.5 rounded-md border border-white/10 bg-white/[0.03] p-0.5">
+        <div class="flex shrink-0 items-center gap-0.5 rounded-md border border-line bg-white/[0.03] p-0.5">
           <ToggleSeg
             active={props.mode === "edit"}
             onClick={() => props.onSetMode("edit")}
@@ -449,7 +449,7 @@ function CardDetail(props: {
           class="shrink-0 rounded p-1.5"
           classList={{
             "text-amber-300/90 hover:bg-amber-300/10": !!card()?.pinned,
-            "text-white/40 hover:bg-white/10 hover:text-white": !card()?.pinned,
+            "text-faint hover:bg-white/10 hover:text-ink": !card()?.pinned,
           }}
           onClick={onTogglePin}
           title={
@@ -461,7 +461,7 @@ function CardDetail(props: {
           {card()?.pinned ? <Pin size={13} /> : <PinOff size={13} />}
         </button>
         <button
-          class="shrink-0 rounded p-1.5 text-white/40 hover:bg-rose-500/15 hover:text-rose-300"
+          class="shrink-0 rounded p-1.5 text-faint hover:bg-rose-500/15 hover:text-rose-300"
           onClick={onDelete}
           title="delete card"
         >
@@ -470,13 +470,13 @@ function CardDetail(props: {
       </div>
 
       {/* Meta row */}
-      <div class="flex shrink-0 flex-wrap items-center gap-2 border-b border-white/5 px-4 py-2 text-[11px]">
-        <span class="text-white/40">kind:</span>
+      <div class="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-4 py-2 text-[11px]">
+        <span class="text-faint">kind:</span>
         <div class="flex items-center gap-0.5">
           <For each={KINDS}>
             {(k) => (
               <button
-                class="flex items-center gap-1 rounded px-2 py-0.5 text-white/55 transition hover:bg-white/5 hover:text-white"
+                class="flex items-center gap-1 rounded px-2 py-0.5 text-dim transition hover:bg-white/5 hover:text-ink"
                 classList={{
                   "!bg-white/10 !text-white": card()?.kind === k.id,
                 }}
@@ -488,16 +488,16 @@ function CardDetail(props: {
             )}
           </For>
         </div>
-        <span class="ml-2 flex items-center gap-1 text-white/40">
+        <span class="ml-2 flex items-center gap-1 text-faint">
           <Tag size={10} /> tags:
         </span>
         <div class="flex flex-wrap items-center gap-1">
           <For each={card()?.tags ?? []}>
             {(t) => (
-              <span class="group/tag flex items-center gap-1 rounded-full bg-white/[0.06] px-2 py-[1px] text-white/75">
+              <span class="group/tag flex items-center gap-1 rounded-full bg-white/[0.06] px-2 py-[1px] text-dim">
                 <span>#{t}</span>
                 <button
-                  class="text-white/40 hover:text-white"
+                  class="text-faint hover:text-ink"
                   onClick={() => onTagRemove(t)}
                 >
                   <X size={9} />
@@ -506,7 +506,7 @@ function CardDetail(props: {
             )}
           </For>
           <input
-            class="w-24 rounded-md bg-transparent px-1.5 py-0.5 text-white outline-none placeholder:text-white/30 focus:bg-white/[0.04]"
+            class="w-24 rounded-md bg-transparent px-1.5 py-0.5 text-white outline-none placeholder:text-faint focus:bg-white/[0.04]"
             placeholder="+ tag"
             value={tagDraft()}
             onInput={(e) => setTagDraft(e.currentTarget.value)}
@@ -535,7 +535,7 @@ function CardDetail(props: {
             <div class="min-h-0 flex-1 overflow-y-auto px-6 py-4">
               <MarkdownView source={body()} />
               <Show when={!body().trim()}>
-                <p class="text-[12px] italic text-white/30">empty</p>
+                <p class="text-[12px] italic text-faint">empty</p>
               </Show>
             </div>
           }
@@ -565,7 +565,7 @@ function ToggleSeg(props: {
 }) {
   return (
     <button
-      class="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-white/55 transition hover:bg-white/5 hover:text-white"
+      class="flex items-center gap-1 rounded px-2 py-1 text-[11px] text-dim transition hover:bg-white/5 hover:text-ink"
       classList={{ "!bg-white/15 !text-white": props.active }}
       onClick={props.onClick}
     >
@@ -628,7 +628,7 @@ function MarkdownEditor(props: {
   return (
     <div
       ref={host}
-      class="min-h-0 min-w-0 flex-1 overflow-hidden bg-[#0b0d10]"
+      class="min-h-0 min-w-0 flex-1 overflow-hidden bg-void"
     />
   );
 }
@@ -637,14 +637,14 @@ function MarkdownEditor(props: {
 
 function EmptyDetail(props: { hasAnyCards: boolean; onNew: () => void }) {
   return (
-    <div class="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-white/40">
+    <div class="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-faint">
       <Brain size={28} class="text-white/25" />
       <Show
         when={props.hasAnyCards}
         fallback={
           <>
             <p class="text-sm">no memory yet — your project, your context</p>
-            <p class="max-w-sm text-[12px] leading-relaxed text-white/35">
+            <p class="max-w-sm text-[12px] leading-relaxed text-faint">
               cards are markdown files saved to{" "}
               <code class="rounded bg-white/[0.06] px-1 py-0.5 text-[11px]">
                 ~/.cosmos/projects/&lt;slug&gt;/memories/
