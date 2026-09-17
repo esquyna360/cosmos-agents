@@ -124,7 +124,7 @@ fn ensure_runner(store: &Store, project: &ProjectRecord) -> Result<projects::Run
         return Ok(runner);
     }
 
-    let record = projects::build_runner_record(
+    let mut record = projects::build_runner_record(
         crate::uuid_v4_for_ipc(),
         project.id.clone(),
         "agent".to_string(),
@@ -134,6 +134,7 @@ fn ensure_runner(store: &Store, project: &ProjectRecord) -> Result<projects::Run
         None,
         now_unix(),
     );
+    record.mode = "chat".to_string();
     store.runners_upsert(&projects::runner_record_to_row(&record)?)?;
     Ok(record)
 }

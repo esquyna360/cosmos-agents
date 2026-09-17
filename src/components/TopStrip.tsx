@@ -15,7 +15,7 @@ import {
 import { closeTab, go, navMode, openTabs, route, routeProjectId, setNavMode } from "../stores/nav";
 import { openCreator } from "../stores/creator";
 import { openJump } from "../stores/jump";
-import { setSettingsOpen } from "../stores/layout";
+import { setSettingsOpen, sidebarOpen } from "../stores/layout";
 import { cycleTheme, themeSpec } from "../stores/theme";
 import { webInfo, type WebInfo } from "../lib/remote";
 import { needsYou } from "../ui/StatusGlyph";
@@ -203,9 +203,11 @@ function Remote() {
   );
 }
 
-/** Tabs mode only: the open project's agents (and terminals) as a second row. */
+/** With no pinned sidebar to show them, the open project's agents and
+ *  terminals sit in a second row: siblings are always one click away. */
 export function ChildStrip() {
-  const project = () => (navMode() === "tabs" && routeProjectId() ? focusedProject() : null);
+  const project = () =>
+    (navMode() === "tabs" || !sidebarOpen()) && routeProjectId() ? focusedProject() : null;
   return (
     <Show when={project() && childrenOf(project()!).length > 0}>
       <div class="flex h-[34px] shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line bg-panel px-3 [scrollbar-width:none]">

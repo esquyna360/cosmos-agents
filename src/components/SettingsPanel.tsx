@@ -116,7 +116,7 @@ function NavSection() {
   );
   return (
     <section class="mb-6 flex flex-col gap-2.5">
-      <SectionTitle icon={Palette} title="navegação" hint="⌘B alterna" />
+      <SectionTitle icon={Palette} title="navegação" hint="⌘B recolhe a barra" />
       <div class="flex flex-wrap gap-1.5">
         <Pick on={navMode() === "sidebar"} label="Barra lateral" onClick={() => setNavMode("sidebar")} />
         <Pick on={navMode() === "tabs"} label="Abas no topo" onClick={() => setNavMode("tabs")} />
@@ -209,7 +209,7 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
     title: "janela",
     items: [
       ["⌘0", "início"],
-      ["⌘B", "barra lateral ou abas"],
+      ["⌘B", "recolher ou fixar a barra lateral"],
       ["⌘⇧H", "Hub"],
       ["⌘N", "novo agente"],
       ["⌘,", "configurações"],

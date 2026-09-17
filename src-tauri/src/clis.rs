@@ -1,4 +1,6 @@
 use std::collections::HashSet;
+#[cfg(windows)]
+use crate::NoConsole;
 use std::process::Command;
 
 use serde::Serialize;
@@ -91,7 +93,7 @@ fn probe_available() -> HashSet<String> {
         for p in PRESETS {
             // `where.exe` exits 0 when it found at least one match. We don't
             // care about the path itself — only presence.
-            let out = Command::new("where.exe").arg(p.binary).output();
+            let out = Command::new("where.exe").hidden().arg(p.binary).output();
             match out {
                 Ok(o) if o.status.success() => {
                     found.insert(p.binary.to_string());

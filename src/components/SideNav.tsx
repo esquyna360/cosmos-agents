@@ -1,6 +1,6 @@
 import { projectLabel } from "../lib/projectLabel";
-import { createMemo, For, Show } from "solid-js";
-import { ListTree, Plus } from "lucide-solid";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js";
+import { ListTree, PanelLeftClose, PanelLeftOpen, Plus } from "lucide-solid";
 
 import {
   focusProject,
@@ -23,8 +23,10 @@ import {
   setNavMode,
 } from "../stores/nav";
 import { openCreator } from "../stores/creator";
+import { setSidebarOpen, sidebarOpen } from "../stores/layout";
+import { projectLabel as labelOf } from "../lib/projectLabel";
 import StatusGlyph, { glyphFor, needsYou } from "../ui/StatusGlyph";
-import { openMenu, type MenuItem } from "../ui/Menu";
+import { menuOpen, openMenu, type MenuItem } from "../ui/Menu";
 import { projectMenu, runnerMenu } from "./menus";
 
 /** What a project row lists under itself, given the person's choice. The
@@ -65,16 +67,104 @@ export function navOptionsMenu(): MenuItem[] {
   ];
 }
 
-/** Projects down the side, always in view while something is open. */
+/** Projects down the side. Pinned it is a column; collapsed it is a rail of
+ *  monograms that opens over the page while the pointer is on it. */
 export default function SideNav() {
+  const [peek, setPeek] = createSignal(false);
+  let timer: number | undefined;
+  const later = (v: boolean, ms: number) => {
+    clearTimeout(timer);
+    timer = window.setTimeout(() => setPeek(v), ms);
+  };
+  onCleanup(() => clearTimeout(timer));
+  const pinned = sidebarOpen;
+  const shown = () => pinned() || peek();
+  let inside = false;
+  // A menu opened from the panel keeps it up; once it closes, the pointer
+  // decides again.
+  createEffect(() => {
+    if (!menuOpen() && !inside && !pinned()) later(false, 240);
+  });
+
+  return (
+    <div
+      class="relative z-30 shrink-0 transition-[width] duration-150 ease-out"
+      style={{ width: pinned() ? "232px" : "48px" }}
+      onMouseEnter={() => {
+        inside = true;
+        if (!pinned()) later(true, 80);
+      }}
+      onMouseLeave={() => {
+        inside = false;
+        if (!pinned() && !menuOpen()) later(false, 240);
+      }}
+    >
+      <Show when={!pinned()}>
+        <Rail />
+      </Show>
+      <div
+        class="absolute inset-y-0 left-0 w-[232px] transition-[transform,opacity] duration-150 ease-out"
+        classList={{
+          "pointer-events-none -translate-x-2 opacity-0": !shown(),
+          "shadow-cx-lg": !pinned(),
+        }}
+        aria-hidden={!shown()}
+      >
+        <Panel pinned={pinned()} />
+      </div>
+    </div>
+  );
+}
+
+function Rail() {
+  const projects = createMemo(() => projectsStore.list.filter((p) => !isMasterProject(p)));
+  return (
+    <div class="flex h-full w-[48px] flex-col items-center gap-1.5 border-r border-line bg-panel py-2">
+      <For each={projects()}>
+        {(p) => {
+          const waiting = () => p.runners.some(needsYou);
+          const working = () =>
+            p.runners.some((r) => r.live && (r.status === "streaming" || r.status === "tool_running"));
+          return (
+            <span
+              class="font-heading relative flex h-[30px] w-[30px] items-center justify-center rounded-[10px] text-[13px]"
+              classList={{
+                "bg-fill-3 text-ink": routeProjectId() === p.id,
+                "bg-fill-1 text-dim": routeProjectId() !== p.id,
+              }}
+            >
+              {labelOf(p).replace(/^[~\\/.]+/, "").slice(0, 2) || "·"}
+              <Show when={waiting() || working()}>
+                <span
+                  class="absolute -right-0.5 -top-0.5 h-[8px] w-[8px] rounded-full ring-2 ring-[var(--panel)]"
+                  classList={{ "bg-busy": waiting(), "bg-live": !waiting() }}
+                />
+              </Show>
+            </span>
+          );
+        }}
+      </For>
+    </div>
+  );
+}
+
+function Panel(props: { pinned: boolean }) {
   const projects = createMemo(() => projectsStore.list.filter((p) => !isMasterProject(p)));
 
   return (
-    <aside class="flex w-[232px] shrink-0 flex-col border-r border-line bg-panel">
+    <aside class="flex h-full w-[232px] flex-col border-r border-line bg-panel">
       <div class="flex h-[34px] shrink-0 items-center pl-4 pr-1.5">
         <span class="text-[11.5px] text-faint">Projetos</span>
         <button
           class="cx-icon-btn ml-auto"
+          title={props.pinned ? "Recolher (⌘B). Abre sozinha ao passar o mouse." : "Fixar aberta (⌘B)"}
+          aria-label={props.pinned ? "Recolher barra lateral" : "Fixar barra lateral"}
+          onClick={() => setSidebarOpen(!props.pinned)}
+        >
+          {props.pinned ? <PanelLeftClose size={13} /> : <PanelLeftOpen size={13} />}
+        </button>
+        <button
+          class="cx-icon-btn"
           title="O que aparece na lista"
           aria-label="O que aparece na lista"
           onClick={(e) =>

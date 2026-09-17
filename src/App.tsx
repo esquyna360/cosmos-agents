@@ -63,6 +63,7 @@ import {
   inspector,
   settingsOpen,
   toggleSettings,
+  toggleSidebar,
 } from "./stores/layout";
 import { cycleTheme, initTheme } from "./stores/theme";
 import { startUpdateWatch } from "./stores/updates";
@@ -144,7 +145,8 @@ export default function App() {
       }
       if (key === "b") {
         e.preventDefault();
-        setNavMode(navMode() === "sidebar" ? "tabs" : "sidebar");
+        if (navMode() === "tabs") setNavMode("sidebar");
+        else toggleSidebar();
         return;
       }
       if (key === "h" && e.shiftKey) {

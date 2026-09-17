@@ -5,6 +5,7 @@
 //! cloudflared reconnects, so it is written to `~/.cosmos/web-url` and pushed
 //! to Telegram — a URL you have to come back to the desk to read is useless.
 
+use crate::NoConsole;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -216,6 +217,7 @@ fn notify(home: &Path, link: &str) {
     let text = format!("De: Cosmos\n\nWeb UI no ar:\n{link}");
     std::thread::spawn(move || {
         let _ = std::process::Command::new("curl")
+            .hidden()
             .args([
                 "-s",
                 "-o",

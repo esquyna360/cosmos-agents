@@ -22,6 +22,9 @@ interface OpenAt {
 
 const [open, setOpen] = createSignal<OpenAt | null>(null);
 
+/** True while the popup is up, so hover-driven chrome can hold still. */
+export const menuOpen = () => open() !== null;
+
 /** Opens the app's one popup menu at a point, or anchored under an element. */
 export function openMenu(at: MouseEvent | HTMLElement, items: MenuItem[]): void {
   if (at instanceof HTMLElement) {

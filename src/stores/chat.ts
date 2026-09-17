@@ -42,6 +42,7 @@ import {
   focusedRunner,
   loadProjects,
   markRunnerLive,
+  masterRunner,
   onRunnerKill,
   onRunnerReset,
   patchRunner,
@@ -719,6 +720,8 @@ export function unqueue(runnerId: string, itemId: string): void {
 export async function syncTitle(runnerId: string): Promise<void> {
   const found = findRunner(runnerId);
   if (!found || found.runner.kind !== "agent" || !found.runner.sessionId) return;
+  // The Hub is found by its name on both sides; a title must never rename it.
+  if (masterRunner()?.id === runnerId) return;
   try {
     const wanted = pendingTitle.get(runnerId);
     if (wanted && !found.runner.live) {

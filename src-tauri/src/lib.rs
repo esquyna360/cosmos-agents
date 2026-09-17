@@ -105,6 +105,17 @@ pub(crate) fn no_console(cmd: &mut std::process::Command) {
     let _ = cmd;
 }
 
+/// The same, for builder chains.
+pub(crate) trait NoConsole {
+    fn hidden(&mut self) -> &mut Self;
+}
+impl NoConsole for std::process::Command {
+    fn hidden(&mut self) -> &mut Self {
+        no_console(self);
+        self
+    }
+}
+
 /// Stop a runner's PTY without deleting the row. This is what the UI's close
 /// button does now: the conversation stays resumable, and reopening the tab
 /// respawns with `--resume`.
@@ -417,6 +428,7 @@ fn open_external(url: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     let mut cmd = {
         let mut c = std::process::Command::new("cmd");
+        no_console(&mut c);
         c.args(["/C", "start", ""]);
         c
     };

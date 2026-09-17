@@ -5,6 +5,7 @@
 //! reconnects — so the URL is a moving target by design: we watch for it,
 //! persist it, and hand it to whoever asked to be told.
 
+use crate::NoConsole;
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -51,6 +52,7 @@ pub fn stop() {
             .status();
         #[cfg(windows)]
         let _ = Command::new("taskkill")
+            .hidden()
             .args(["/PID", &pid.to_string(), "/T", "/F"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -73,6 +75,7 @@ pub fn binary() -> Option<String> {
                 std::path::Path::new(c).exists()
             } else {
                 Command::new(c)
+                    .hidden()
                     .arg("--version")
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
@@ -126,6 +129,7 @@ where
     F: Fn(&str),
 {
     let mut child: Child = Command::new(bin)
+        .hidden()
         .args([
             "tunnel",
             "--no-autoupdate",

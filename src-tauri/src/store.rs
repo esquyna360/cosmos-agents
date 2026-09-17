@@ -175,6 +175,9 @@ impl Store {
         if user_version < 6 {
             Self::migrate_v5_to_v6(&mut conn)?;
         }
+        if user_version < 7 {
+            Self::migrate_v6_to_v7(&mut conn)?;
+        }
         Ok(())
     }
 
@@ -430,6 +433,20 @@ impl Store {
         Self::ensure_column(&tx, "runners", "task", "TEXT NOT NULL DEFAULT ''")?;
         tx.execute_batch("PRAGMA user_version = 6")?;
         tx.commit().context("committing v5→v6 migration")?;
+        Ok(())
+    }
+
+    /// The Hub used to be a terminal because chat didn't exist when it was
+    /// born. Once, move it to chat; after that the person's choice sticks.
+    fn migrate_v6_to_v7(conn: &mut Connection) -> Result<()> {
+        let tx = conn.transaction()?;
+        tx.execute_batch(
+            "UPDATE runners SET mode = 'chat'
+             WHERE kind = 'agent' AND lower(name) = 'geral'
+               AND project_id IN (SELECT id FROM projects WHERE lower(name) = 'geral');
+             PRAGMA user_version = 7",
+        )?;
+        tx.commit().context("committing v6→v7 migration")?;
         Ok(())
     }
 

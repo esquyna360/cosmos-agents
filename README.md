@@ -16,8 +16,8 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
   grouped by project (filters, context, cost, last activity) under a
   composer: type the task, pick the project, get an agent. *Hub* is the
   `geral` agent, the one that drives the `cosmos` CLI for you.
-- **Projects nav** — a sidebar or tabs in the top strip (`⌘B` switches),
-  listing only projects, projects with agents, or agents and terminals.
+- **Projects nav** — a sidebar (`⌘B` collapses it to a rail that opens on hover) or tabs
+  in the top strip, listing only projects, projects with agents, or agents and terminals.
   Anything stopped for 3+ days is folded away. `⌘K` jumps anywhere.
 - **New agent** (`⌘N`) — where, an optional task (sent as the first
   message), a name, and *main* or its *own worktree*
@@ -100,7 +100,7 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
 | `⌘⇧W` | stop every runner of the project |
 | `⌘1–9` | focus N-th project |
 | `⌘0` / `⌘⇧H` | home / Hub |
-| `⌘B` | projects as sidebar ↔ tabs |
+| `⌘B` | collapse / pin the sidebar (collapsed, it opens on hover) |
 | `⌘E` | project tools (overview → files → diff → memory → browser) |
 | `⌘P` / `⌘⇧F` | file palette / grep |
 | `⌘,` | settings |

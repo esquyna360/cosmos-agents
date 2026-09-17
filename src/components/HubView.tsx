@@ -1,6 +1,16 @@
 import { For, Show } from "solid-js";
+import { Ellipsis, MessageSquare } from "lucide-solid";
 
-import { isChat, masterProject, masterRunner, projectsStore, isMasterProject } from "../stores/projects";
+import {
+  isChat,
+  isMasterProject,
+  masterProject,
+  masterRunner,
+  projectsStore,
+  setRunnerMode,
+} from "../stores/projects";
+import { openMenu } from "../ui/Menu";
+import { runnerMenu } from "./menus";
 import { send } from "../stores/chat";
 import { ptyWrite } from "../lib/ipc";
 import { SessionBody } from "./SessionView";
@@ -37,6 +47,25 @@ export default function HubView() {
               Peça em português. Ele cria projetos, sobe e para agentes e responde sobre{" "}
               {count() === 1 ? "o seu projeto" : `os seus ${count()} projetos`}.
             </p>
+            <div class="ml-auto flex shrink-0 items-center gap-1">
+              <Show when={!isChat(masterRunner()!)}>
+                <button
+                  class="cx-pill cx-pill-line"
+                  data-on="true"
+                  onClick={() => void setRunnerMode(masterRunner()!.id, "chat")}
+                >
+                  <MessageSquare size={12} />
+                  Voltar ao chat
+                </button>
+              </Show>
+              <button
+                class="cx-icon-btn"
+                aria-label="Mais ações do Hub"
+                onClick={(e) => openMenu(e.currentTarget, runnerMenu(masterProject()!, masterRunner()!))}
+              >
+                <Ellipsis size={15} />
+              </button>
+            </div>
           </div>
           <div class="flex flex-wrap gap-1.5">
             <For each={SUGGESTIONS}>
