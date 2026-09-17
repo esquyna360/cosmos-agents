@@ -1,3 +1,4 @@
+import { projectLabel } from "../lib/projectLabel";
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { ChevronRight, Globe, ListTree, Moon, Plus, Search, Settings2, Sun, X } from "lucide-solid";
 
@@ -157,7 +158,7 @@ function ProjectTabPill(props: { project: ProjectUI }) {
       }}
     >
       <span class={`h-[6px] w-[6px] shrink-0 rounded-full ${dot()}`} />
-      <span class="max-w-[150px] truncate">{p().name}</span>
+      <span class="max-w-[150px] truncate" title={p().folders[0]}>{projectLabel(p())}</span>
       <button
         class="flex h-4 w-4 items-center justify-center rounded-full text-faint opacity-0 transition hover:bg-fill-3 hover:text-ink group-hover:opacity-100"
         classList={{ "!opacity-100": on() }}

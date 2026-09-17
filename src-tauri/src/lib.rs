@@ -92,6 +92,19 @@ fn pty_spawn(
         .map_err(|e| e.to_string())
 }
 
+/// Cosmos is a GUI app with no console of its own, so on Windows every
+/// console child (powershell, git) would get a visible window, and closing
+/// that window kills the child. CREATE_NO_WINDOW keeps it headless.
+pub(crate) fn no_console(cmd: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    #[cfg(not(windows))]
+    let _ = cmd;
+}
+
 /// Stop a runner's PTY without deleting the row. This is what the UI's close
 /// button does now: the conversation stays resumable, and reopening the tab
 /// respawns with `--resume`.
@@ -266,8 +279,10 @@ fn clis_get(id: String) -> Option<CliInfo> {
 #[tauri::command]
 async fn git_diff(cwd: String) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
-        let out = std::process::Command::new("git")
-            .args(["-C", &cwd, "diff", "--no-color"])
+        let mut cmd = std::process::Command::new("git");
+        cmd.args(["-C", &cwd, "diff", "--no-color"]);
+        no_console(&mut cmd);
+        let out = cmd
             .output()
             .map_err(|e| e.to_string())?;
         if !out.status.success() {

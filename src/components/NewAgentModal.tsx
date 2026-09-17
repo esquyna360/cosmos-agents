@@ -1,3 +1,4 @@
+import { projectLabel } from "../lib/projectLabel";
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
 import { open } from "@tauri-apps/plugin-dialog";
 import { FolderPlus, GitBranch, X } from "lucide-solid";
@@ -18,8 +19,9 @@ interface Props {
 }
 
 export function basenameOf(path: string): string {
-  const i = path.replace(/\/+$/, "").lastIndexOf("/");
-  return i >= 0 ? path.slice(i + 1) : path;
+  const trimmed = path.replace(/[\\/]+$/, "");
+  const i = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return (i >= 0 ? trimmed.slice(i + 1) : trimmed) || path;
 }
 
 const shellQuote = (s: string) => `"${s.replace(/(["\\$`])/g, "\\$1")}"`;
@@ -135,7 +137,7 @@ export default function NewAgentModal(props: Props) {
                     setProjectId(p.id);
                   }}
                 >
-                  {p.name}
+                  {projectLabel(p)}
                 </button>
               )}
             </For>

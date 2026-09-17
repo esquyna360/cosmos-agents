@@ -39,7 +39,7 @@ export function shortPath(path: string, roots: string[]): string {
     if (path === base) return ".";
     if (path.startsWith(`${base}/`)) return path.slice(base.length + 1);
   }
-  return path.replace(/^\/Users\/[^/]+\//, "~/");
+  return path.replace(/^\/Users\/[^/]+\//, "~/").replace(/^[A-Za-z]:\\Users\\[^\\]+\\/, "~\\");
 }
 
 export function describeTool(name: string, input: Input, roots: string[]): ToolDisplay {

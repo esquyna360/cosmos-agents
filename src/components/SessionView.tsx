@@ -1,3 +1,4 @@
+import { projectLabel } from "../lib/projectLabel";
 import { Show } from "solid-js";
 import {
   Ellipsis,
@@ -100,7 +101,7 @@ export default function SessionView(props: Props) {
           </div>
           <div class="mt-1 flex min-w-0 items-center gap-2.5 text-[11.5px] text-faint">
             <button class="shrink-0 text-dim hover:text-accent" onClick={() => focusProject(props.project.id)}>
-              {props.project.name}
+              {projectLabel(props.project)}
             </button>
             <Show when={branch()}>
               <span class="flex shrink-0 items-center gap-1 font-mono text-[11px]" title={r().cwd ? "Worktree própria" : "Checkout principal"}>

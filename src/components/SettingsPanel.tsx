@@ -1,4 +1,4 @@
-import { navChildren, navMode, setNavChildren, setNavMode } from "../stores/nav";
+import { navChildren, navLabel, navMode, setNavChildren, setNavLabel, setNavMode } from "../stores/nav";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import {
   Check,
@@ -120,6 +120,10 @@ function NavSection() {
       <div class="flex flex-wrap gap-1.5">
         <Pick on={navMode() === "sidebar"} label="Barra lateral" onClick={() => setNavMode("sidebar")} />
         <Pick on={navMode() === "tabs"} label="Abas no topo" onClick={() => setNavMode("tabs")} />
+      </div>
+      <div class="flex flex-wrap gap-1.5">
+        <Pick on={navLabel() === "name"} label="Nome do projeto" onClick={() => setNavLabel("name")} />
+        <Pick on={navLabel() === "path"} label="Caminho completo" onClick={() => setNavLabel("path")} />
       </div>
       <div class="flex flex-wrap gap-1.5">
         <Pick on={navChildren() === "none"} label="Só projetos" onClick={() => setNavChildren("none")} />

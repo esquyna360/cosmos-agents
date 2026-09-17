@@ -1,3 +1,4 @@
+import { projectLabel } from "../lib/projectLabel";
 import { createMemo, For, Show } from "solid-js";
 import { ListTree, Plus } from "lucide-solid";
 
@@ -12,15 +13,25 @@ import {
   type ProjectUI,
   type RunnerUI,
 } from "../stores/projects";
-import { navChildren, routeProjectId, route, setNavChildren, setNavMode } from "../stores/nav";
+import {
+  navChildren,
+  navLabel,
+  route,
+  routeProjectId,
+  setNavChildren,
+  setNavLabel,
+  setNavMode,
+} from "../stores/nav";
 import { openCreator } from "../stores/creator";
 import StatusGlyph, { glyphFor, needsYou } from "../ui/StatusGlyph";
 import { openMenu, type MenuItem } from "../ui/Menu";
 import { projectMenu, runnerMenu } from "./menus";
 
-/** What a project row lists under itself, given the person's choice. */
+/** What a project row lists under itself, given the person's choice. The
+ *  project you are inside always lists everything: with an agent open, its
+ *  siblings have to be one click away. */
 export function childrenOf(p: ProjectUI): RunnerUI[] {
-  const mode = navChildren();
+  const mode = route().kind === "session" && routeProjectId() === p.id ? "all" : navChildren();
   if (mode === "none") return [];
   const current = focusedRunner()?.id;
   return p.runners.filter(
@@ -38,7 +49,17 @@ export function navOptionsMenu(): MenuItem[] {
     onSelect: () => setNavChildren(v),
   });
   return [
-    pick("none", "Só projetos"),
+    {
+      label: "Nome do projeto",
+      checked: navLabel() === "name",
+      onSelect: () => setNavLabel("name"),
+    },
+    {
+      label: "Caminho completo",
+      checked: navLabel() === "path",
+      onSelect: () => setNavLabel("path"),
+    },
+    { ...pick("none", "Só projetos"), separatorBefore: true },
     pick("agents", "Com agentes"),
     pick("all", "Com agentes e terminais"),
   ];
@@ -108,7 +129,9 @@ function ProjectRow(props: { project: ProjectUI }) {
           openMenu(e, projectMenu(p()));
         }}
       >
-        <span class="font-heading min-w-0 flex-1 truncate text-[14px] text-ink">{p().name}</span>
+        <span class="font-heading min-w-0 flex-1 truncate text-[14px] text-ink" title={p().folders[0]}>
+          {projectLabel(p())}
+        </span>
         <Show when={waiting() > 0}>
           <span class="flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-busy px-1 text-[10px] font-semibold text-accent-ink">
             {waiting()}

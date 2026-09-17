@@ -791,6 +791,9 @@ export async function setRunnerMode(id: string, mode: RunnerMode): Promise<void>
   await runnersSetMode(id, mode);
   patchRunner(id, { mode, live: false, status: "idle" as RunnerStatus, activity: "" });
   if (mode === "tty") await restartRunner(id);
+  // Whatever was said in the terminal is only in the transcript: drop the
+  // chat's copy so it is read again from disk.
+  else for (const fn of resetHooks) fn(id);
 }
 
 const killHooks: ((id: string) => void)[] = [];

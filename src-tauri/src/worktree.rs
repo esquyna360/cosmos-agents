@@ -24,6 +24,7 @@ pub fn is_managed(home: &Path, path: &str) -> bool {
 fn git(repo: &str, args: &[&str]) -> Result<std::process::Output> {
     let mut cmd = Command::new("git");
     cmd.arg("-C").arg(repo).args(args);
+    crate::no_console(&mut cmd);
     if let Some(path) = crate::pty_supervisor::path_with_cli_dir() {
         cmd.env("PATH", path);
     }

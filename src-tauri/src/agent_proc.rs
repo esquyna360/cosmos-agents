@@ -115,6 +115,7 @@ impl AgentSupervisor {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        crate::no_console(&mut cmd);
         // Cosmos itself may have been launched from inside a Claude Code
         // session; its markers would make the child think it is nested.
         for (k, _) in std::env::vars_os() {

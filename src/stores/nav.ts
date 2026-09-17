@@ -123,3 +123,15 @@ export function setNavChildren(v: NavChildren): void {
   setNavChildrenRaw(v);
   localStorage.setItem(NAV_CHILDREN_KEY, v);
 }
+
+/** How a project is labelled in lists: its name, or the folder's full path. */
+export type NavLabel = "name" | "path";
+const NAV_LABEL_KEY = "cosmos.nav.label";
+const [navLabel, setNavLabelRaw] = createSignal<NavLabel>(
+  localStorage.getItem(NAV_LABEL_KEY) === "path" ? "path" : "name",
+);
+export { navLabel };
+export function setNavLabel(v: NavLabel): void {
+  setNavLabelRaw(v);
+  localStorage.setItem(NAV_LABEL_KEY, v);
+}

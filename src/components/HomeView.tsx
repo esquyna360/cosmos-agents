@@ -1,3 +1,4 @@
+import { projectLabel } from "../lib/projectLabel";
 import { createMemo, createSignal, For, Show } from "solid-js";
 import { ArrowUp, Ellipsis, GitBranch, SlidersHorizontal } from "lucide-solid";
 
@@ -80,7 +81,7 @@ export default function HomeView() {
               data-on={projectId() === p.id}
               onClick={() => setProjectId(projectId() === p.id ? null : p.id)}
             >
-              {p.name}
+              {projectLabel(p)}
             </button>
           )}
         </For>
@@ -118,7 +119,7 @@ export default function HomeView() {
                       class="font-heading text-[14.5px] text-ink hover:text-accent"
                       onClick={() => focusProject(g.p.id)}
                     >
-                      {g.p.name}
+                      {projectLabel(g.p)}
                     </button>
                     <span class="truncate font-mono text-[11px] text-faint">
                       {shortPath(workFolder(g.p), [])}
@@ -285,7 +286,7 @@ function QuickAgent() {
             <For each={projects()}>
               {(p) => (
                 <button class="cx-pill cx-pill-line !h-[26px]" data-on={project()?.id === p.id} onClick={() => pick(p.id)}>
-                  {p.name}
+                  {projectLabel(p)}
                 </button>
               )}
             </For>
