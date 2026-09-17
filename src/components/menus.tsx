@@ -30,7 +30,7 @@ import {
 } from "../stores/projects";
 import { openCreator } from "../stores/creator";
 import { closeTab, openTabs } from "../stores/nav";
-import { isClaudeRunner, openPath } from "../lib/projects";
+import { CHAT_ENABLED, isClaudeRunner, openPath } from "../lib/projects";
 import { startInlineEdit } from "./InlineEdit";
 import type { MenuItem } from "../ui/Menu";
 
@@ -42,7 +42,7 @@ export function runnerMenu(project: ProjectUI, r: RunnerUI, editKey?: string): M
     ...(editKey
       ? [{ label: "Renomear", icon: Pencil, onSelect: () => startInlineEdit(editKey) } satisfies MenuItem]
       : []),
-    ...(isAgent && r.sessionId && isClaudeRunner(r)
+    ...(CHAT_ENABLED && isAgent && r.sessionId && isClaudeRunner(r)
       ? [
           {
             label: r.mode === "chat" ? "Continuar no terminal do Claude Code" : "Voltar ao chat",

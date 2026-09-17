@@ -6,6 +6,9 @@ export type RunnerKind = "agent" | "shell";
 /// How an agent is driven: native chat over stream-json, or the CLI's own TUI.
 export type RunnerMode = "chat" | "tty";
 
+/** Mirrors `projects::CHAT_ENABLED`: chat is off until it can drive Chrome. */
+export const CHAT_ENABLED: boolean = false;
+
 /// Wire shape — superset of AgentStatus with shell-only lifecycle states.
 export type RunnerStatus = AgentStatus | "running" | "exited";
 
@@ -100,7 +103,7 @@ function runnerFromSnake(r: RunnerSnake): Runner {
     createdAt: r.created_at,
     lastActive: r.last_active,
     sessionId: r.session_id ?? "",
-    mode: r.mode === "chat" ? "chat" : "tty",
+    mode: CHAT_ENABLED && r.mode === "chat" ? "chat" : "tty",
     nameAuto: !!r.name_auto,
     cwd: r.cwd ?? "",
     branch: r.branch ?? "",

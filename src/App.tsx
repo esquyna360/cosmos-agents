@@ -69,7 +69,7 @@ import {
 import { cycleTheme, initTheme } from "./stores/theme";
 import { startUpdateWatch } from "./stores/updates";
 import { ptyLiveIds, type AgentStatus } from "./lib/ipc";
-import { isClaudeRunner } from "./lib/projects";
+import { CHAT_ENABLED, isClaudeRunner } from "./lib/projects";
 
 export default function App() {
   const [palette, setPalette] = createSignal<PaletteMode | null>(null);
@@ -184,7 +184,7 @@ export default function App() {
       if (key === "j") {
         e.preventDefault();
         const r = focusedRunner();
-        if (r && isClaudeRunner(r)) setRunnerMode(r.id, r.mode === "chat" ? "tty" : "chat").catch(console.error);
+        if (CHAT_ENABLED && r && isClaudeRunner(r)) setRunnerMode(r.id, r.mode === "chat" ? "tty" : "chat").catch(console.error);
         return;
       }
       if (key === "w" && e.shiftKey) {

@@ -25,6 +25,10 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
   dialog prints the equivalent `cosmos runner add …` command.
 - **CLI** — `cosmos runner add --task --worktree`, `runner send`,
   `runner stop`, `runner rename`, `runner list`, `cosmos status`.
+  - **Chat is switched off for now** (`CHAT_ENABLED` in `projects.rs` and
+    `lib/projects.ts`): the headless session can't drive the Chrome
+    integration, so every agent runs as a terminal. What follows describes
+    chat mode for when it comes back.
   - A Claude Code session opens as a **native chat**: Cosmos runs
     `claude -p` with stream-json on both pipes (`agent_proc.rs` is a dumb
     line pipe; the protocol lives in `src/lib/claudeProtocol.ts` and

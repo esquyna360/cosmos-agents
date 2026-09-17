@@ -18,6 +18,8 @@ export interface SpawnOpts {
   projectId?: string;
   /** "agent" | "shell". Defaults to "agent" server-side. */
   kind?: "agent" | "shell";
+  /** Claude Code's opening prompt, for a terminal agent created with a task. */
+  prompt?: string;
 }
 
 export function ptySpawn(opts: SpawnOpts): Promise<void> {

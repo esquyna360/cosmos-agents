@@ -53,6 +53,7 @@ fn pty_spawn(
     // When absent, runner is treated as a legacy agent with no project routing.
     project_id: Option<String>,
     kind: Option<String>,
+    prompt: Option<String>,
 ) -> Result<(), String> {
     let project_id = project_id.unwrap_or_default();
     let kind = kind
@@ -84,7 +85,8 @@ fn pty_spawn(
         Some(rec) => {
             let home = home_dir(&app).unwrap_or_default();
             let args = projects::spawn_args_for(&home, &rec, &cwd);
-            projects::with_project_memory(args, &home, &project_slug, &rec)
+            let args = projects::with_project_memory(args, &home, &project_slug, &rec);
+            projects::with_initial_prompt(args, &rec, prompt.as_deref().unwrap_or(""))
         }
         None => args,
     };
@@ -564,7 +566,7 @@ fn runners_create(
         env,
         now_unix(),
     );
-    if mode.as_deref() == Some("chat") && projects::is_claude_command(&rec.args) {
+    if projects::CHAT_ENABLED && mode.as_deref() == Some("chat") && projects::is_claude_command(&rec.args) {
         rec.mode = "chat".into();
     }
     rec.name_auto = name_auto.unwrap_or(false);
@@ -637,7 +639,7 @@ fn runner_record(store: &Store, id: &str) -> Result<RunnerRecord, String> {
 #[tauri::command]
 fn runners_set_mode(store: State<'_, Store>, id: String, mode: String) -> Result<(), String> {
     let mut found = runner_record(&store, &id)?;
-    found.mode = if mode == "chat" && projects::is_claude_command(&found.args) {
+    found.mode = if projects::CHAT_ENABLED && mode == "chat" && projects::is_claude_command(&found.args) {
         "chat".into()
     } else {
         "tty".into()

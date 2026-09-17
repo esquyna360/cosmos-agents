@@ -1,3 +1,4 @@
+import { CHAT_ENABLED } from "../lib/projects";
 import { For, Show } from "solid-js";
 import { Ellipsis, MessageSquare } from "lucide-solid";
 
@@ -48,7 +49,7 @@ export default function HubView() {
               {count() === 1 ? "o seu projeto" : `os seus ${count()} projetos`}.
             </p>
             <div class="ml-auto flex shrink-0 items-center gap-1">
-              <Show when={!isChat(masterRunner()!)}>
+              <Show when={CHAT_ENABLED && !isChat(masterRunner()!)}>
                 <button
                   class="cx-pill cx-pill-line"
                   data-on="true"

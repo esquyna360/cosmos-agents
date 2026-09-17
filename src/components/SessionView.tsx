@@ -25,7 +25,7 @@ import {
 import { renameSession, statsOf } from "../stores/chat";
 import { branchOf } from "../stores/git";
 import { inspector, setInspector, type InspectorTab } from "../stores/layout";
-import { isClaudeRunner } from "../lib/projects";
+import { CHAT_ENABLED, isClaudeRunner } from "../lib/projects";
 import { shortPath } from "../lib/toolDisplay";
 import { prettyModel } from "./chat/Composer";
 import InlineEdit from "./InlineEdit";
@@ -68,7 +68,7 @@ export function SessionBody(props: Props) {
 export default function SessionView(props: Props) {
   const r = () => props.runner;
   const editKey = () => `header:${r().id}`;
-  const canChat = () => r().kind === "agent" && isClaudeRunner(r());
+  const canChat = () => CHAT_ENABLED && r().kind === "agent" && isClaudeRunner(r());
   const state = () => stateOf(r());
   const branch = () => branchOf(props.project, r());
   const stats = () => (r().kind === "agent" ? statsOf(r().id) : null);

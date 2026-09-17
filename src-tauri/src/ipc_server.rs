@@ -536,7 +536,8 @@ fn spawn_runner(
         now_unix(),
     );
     let is_agent = rec.kind == "agent";
-    let as_chat = is_agent && !opts.tty && projects::is_claude_command(&rec.args);
+    let as_chat =
+        projects::CHAT_ENABLED && is_agent && !opts.tty && projects::is_claude_command(&rec.args);
     if as_chat {
         rec.mode = "chat".into();
     }

@@ -54,6 +54,10 @@ pub struct RunnerRecord {
     pub task: String,
 }
 
+/// Chat mode is switched off for now: the headless session can't drive the
+/// Chrome integration. Every agent runs as a terminal until this flips back.
+pub const CHAT_ENABLED: bool = false;
+
 fn default_mode() -> String {
     "tty".to_string()
 }
@@ -467,7 +471,7 @@ pub fn runner_row_to_record(row: RunnerRow) -> Result<RunnerRecord> {
         created_at: row.created_at,
         last_active: row.last_active,
         session_id: row.session_id,
-        mode: row.mode,
+        mode: if CHAT_ENABLED { row.mode } else { "tty".into() },
         name_auto: row.name_auto,
         cwd: row.cwd,
         branch: row.branch,

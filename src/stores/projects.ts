@@ -17,6 +17,7 @@ import {
   runnersStop,
   runnersTouch,
   runnersUpdate,
+  CHAT_ENABLED,
   isClaudeRunner,
   type Project,
   type Runner,
@@ -571,7 +572,8 @@ export async function createProjectWithAgent(opts: {
 
   // Claude opens as a chat that names itself and starts on the first
   // message; any other CLI is a TUI and needs its PTY right away.
-  const asChat = !opts.agentArgs || isClaudeRunner({ kind: "agent", args: opts.agentArgs });
+  const asChat =
+    CHAT_ENABLED && (!opts.agentArgs || isClaudeRunner({ kind: "agent", args: opts.agentArgs }));
   const typedName = opts.agentName?.trim();
   const runner = await runnersCreate({
     projectId: project.id,
@@ -744,7 +746,7 @@ export async function newAgent(opts: {
 }): Promise<RunnerUI | null> {
   const project = state.list.find((p) => p.id === opts.projectId);
   if (!project) return null;
-  const asChat = !opts.args || isClaudeRunner({ kind: "agent", args: opts.args });
+  const asChat = CHAT_ENABLED && (!opts.args || isClaudeRunner({ kind: "agent", args: opts.args }));
   const typed = opts.name?.trim();
   const fromTask = opts.task?.trim().split(/\s+/).slice(0, 6).join(" ");
   const runner = await runnersCreate({
@@ -759,6 +761,27 @@ export async function newAgent(opts: {
     worktree: opts.worktree,
   });
   const ui = runnerToUI(runner, false);
+  // A terminal agent gets its task as Claude Code's opening prompt. Spawned
+  // here, before the terminal mounts, so the task never lands in the saved args.
+  const task = opts.task?.trim();
+  if (!asChat && task && isClaudeRunner(ui)) {
+    try {
+      await ptySpawn({
+        id: runner.id,
+        cwd: cwdFor(project, ui),
+        program: runner.program,
+        args: runner.args,
+        prompt: task,
+        cols: 100,
+        rows: 30,
+        projectId: project.id,
+        kind: "agent",
+      });
+      ui.live = true;
+    } catch (e) {
+      console.error("[cosmos] pty spawn failed for new agent", e);
+    }
+  }
   setState("list", (p) => p.id === opts.projectId, "runners", (rs) => [...rs, ui]);
   focusRunner(opts.projectId, runner.id);
   return ui;

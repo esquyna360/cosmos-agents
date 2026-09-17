@@ -134,7 +134,9 @@ fn ensure_runner(store: &Store, project: &ProjectRecord) -> Result<projects::Run
         None,
         now_unix(),
     );
-    record.mode = "chat".to_string();
+    if crate::projects::CHAT_ENABLED {
+        record.mode = "chat".to_string();
+    }
     store.runners_upsert(&projects::runner_record_to_row(&record)?)?;
     Ok(record)
 }
