@@ -138,7 +138,6 @@ Builds live on **GitHub Releases**, one per tag:
 | platform | artifact |
 |---|---|
 | macOS Apple Silicon | `Cosmos_<ver>_aarch64.dmg` |
-| macOS Intel | `Cosmos_<ver>_x64.dmg` |
 | Windows | `Cosmos_<ver>_x64-setup.exe` |
 
 The app self-updates from `latest.json` on the same release, so after the
