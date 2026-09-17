@@ -43,6 +43,8 @@ enum Cmd {
         #[arg(long)]
         link: bool,
     },
+    /// Every project with its runners: status, branch and task.
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -58,6 +60,9 @@ enum ProjectCmd {
         memory: String,
         #[arg(long)]
         with_agent: Option<String>,
+        /// First message for the --with-agent agent.
+        #[arg(long)]
+        task: Option<String>,
     },
     List,
     /// Delete a project, its runners and its resumable sessions. The
@@ -92,26 +97,77 @@ enum RunnerCmd {
         /// "agent" (default) or "shell".
         #[arg(long, default_value = "agent")]
         kind: String,
+        /// What the agent should do. Sent as its first message.
+        #[arg(long)]
+        task: Option<String>,
+        /// Give the agent its own git worktree on a `cosmos/<name>` branch
+        /// instead of the project's checkout.
+        #[arg(long)]
+        worktree: bool,
+        /// Start the agent in a terminal instead of the chat.
+        #[arg(long)]
+        tty: bool,
     },
     List {
         #[arg(long)]
         project: Option<String>,
     },
-    /// Delete a runner: kills its PTY and drops the row, session included.
+    /// Delete a runner: kills its process and drops the row, session and
+    /// Cosmos-made worktree included (the branch stays).
     Rm {
-        /// Project the runner lives in. `.` = $COSMOS_PROJECT_SLUG.
-        #[arg(long, default_value = ".")]
-        project: String,
-        /// Runner name. Ambiguous names are refused — use --id instead.
-        #[arg(long)]
-        name: Option<String>,
-        /// Runner id, when the name is ambiguous or unknown.
-        #[arg(long)]
-        id: Option<String>,
+        #[command(flatten)]
+        target: Target,
         #[arg(long)]
         yes: bool,
     },
+    /// Send a message to an agent, as if typed by the user.
+    Send {
+        #[command(flatten)]
+        target: Target,
+        #[arg(long)]
+        message: String,
+    },
+    /// Kill the runner's process. The runner and its session stay.
+    Stop {
+        #[command(flatten)]
+        target: Target,
+    },
+    Rename {
+        #[command(flatten)]
+        target: Target,
+        #[arg(long)]
+        to: String,
+    },
 }
+
+#[derive(clap::Args)]
+struct Target {
+    /// Project the runner lives in. `.` = $COSMOS_PROJECT_SLUG.
+    #[arg(long, default_value = ".")]
+    project: String,
+    /// Runner name. Ambiguous names are refused — use --id instead.
+    #[arg(long)]
+    name: Option<String>,
+    /// Runner id, when the name is ambiguous or unknown.
+    #[arg(long)]
+    id: Option<String>,
+}
+
+impl Target {
+    /// `(project, name, id)` as the app expects them. Only a name needs a
+    /// project to disambiguate against.
+    fn resolve(self) -> Result<(Option<String>, Option<String>, Option<String>), String> {
+        if self.name.is_none() && self.id.is_none() {
+            return Err("cosmos: pass --name or --id".into());
+        }
+        let project = match self.name {
+            Some(_) => Some(resolve_project_handle(&self.project)?),
+            None => None,
+        };
+        Ok((project, self.name, self.id))
+    }
+}
+
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -184,17 +240,20 @@ fn web(link_only: bool) -> ExitCode {
 fn build_request(cli: Cli) -> Result<Request, String> {
     Ok(match cli.cmd {
         Cmd::Web { .. } => unreachable!("handled in main"),
+        Cmd::Status => Request::Status,
         Cmd::Project { cmd } => match cmd {
             ProjectCmd::Add {
                 name,
                 folders,
                 memory,
                 with_agent,
+                task,
             } => Request::ProjectAdd {
                 name,
                 folders,
                 memory,
                 with_agent,
+                task,
             },
             ProjectCmd::List => Request::ProjectList,
             ProjectCmd::Rm { project, yes } => {
@@ -215,12 +274,18 @@ their resumable sessions. Re-run with --yes if that is what you want."
                 project,
                 name,
                 kind,
+                task,
+                worktree,
+                tty,
             } => {
                 let project = resolve_project_handle(&project)?;
                 Request::RunnerAdd {
                     project,
                     name,
                     kind: Some(kind),
+                    task,
+                    worktree,
+                    tty,
                 }
             }
             RunnerCmd::List { project } => {
@@ -230,12 +295,7 @@ their resumable sessions. Re-run with --yes if that is what you want."
                 };
                 Request::RunnerList { project }
             }
-            RunnerCmd::Rm {
-                project,
-                name,
-                id,
-                yes,
-            } => {
+            RunnerCmd::Rm { target, yes } => {
                 if !yes {
                     return Err(
                         "cosmos: `runner rm` kills the runner and throws its session away. \
@@ -243,15 +303,30 @@ Re-run with --yes if that is what you want."
                             .into(),
                     );
                 }
-                if name.is_none() && id.is_none() {
-                    return Err("cosmos: pass --name or --id".into());
-                }
-                let project = match name {
-                    // Only a name needs a project to disambiguate against.
-                    Some(_) => Some(resolve_project_handle(&project)?),
-                    None => None,
-                };
+                let (project, name, id) = target.resolve()?;
                 Request::RunnerRemove { project, name, id }
+            }
+            RunnerCmd::Send { target, message } => {
+                let (project, name, id) = target.resolve()?;
+                Request::RunnerSend {
+                    project,
+                    name,
+                    id,
+                    message,
+                }
+            }
+            RunnerCmd::Stop { target } => {
+                let (project, name, id) = target.resolve()?;
+                Request::RunnerStop { project, name, id }
+            }
+            RunnerCmd::Rename { target, to } => {
+                let (project, name, id) = target.resolve()?;
+                Request::RunnerRename {
+                    project,
+                    name,
+                    id,
+                    to,
+                }
             }
         },
     })

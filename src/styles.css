@@ -1,4 +1,5 @@
-@import "@fontsource-variable/instrument-sans";
+@import "@fontsource-variable/figtree";
+@import "@fontsource/caprasimo/400.css";
 @import "@fontsource-variable/jetbrains-mono";
 @import "@fontsource/fira-code/400.css";
 @import "@fontsource/fira-code/500.css";
@@ -23,7 +24,107 @@
    `--term-*` mirrors the palette into xterm.js (see lib/theme.ts), so the
    terminal is never the one surface that ignores the theme. */
 
+/* Walnut and Cream are the house pair: cream ink on walnut, terracotta for
+   whatever needs you, sage for whatever is working. */
 :root,
+:root[data-theme="walnut"] {
+  color-scheme: dark;
+
+  --app-bg: #201e1d;
+  --void: #201e1d;
+  --panel: #191715;
+  --raised: #2c2925;
+  --float: #322e29;
+  --sunken: rgba(0, 0, 0, 0.34);
+  --well: #141210;
+
+  --fill-1: rgba(245, 234, 216, 0.04);
+  --fill-2: rgba(245, 234, 216, 0.075);
+  --fill-3: rgba(245, 234, 216, 0.12);
+  --fill-4: rgba(245, 234, 216, 0.2);
+
+  --line: rgba(245, 234, 216, 0.08);
+  --line-strong: rgba(245, 234, 216, 0.16);
+
+  --text: #f5ead8;
+  --text-dim: #b9ae9d;
+  --text-faint: #7f776b;
+
+  --accent: #e6935e;
+  --accent-soft: rgba(230, 147, 94, 0.16);
+  --accent-ink: #201e1d;
+  --live: #a9bb8a;
+  --live-soft: rgba(169, 187, 138, 0.14);
+  --busy: #f6a06b;
+  --busy-soft: rgba(246, 160, 107, 0.13);
+  --alert: #ef7d6a;
+  --alert-soft: rgba(239, 125, 106, 0.13);
+  --add-soft: rgba(169, 187, 138, 0.13);
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 24px 60px -18px rgba(0, 0, 0, 0.7);
+
+  --term-bg: #141210;
+  --term-fg: #f0e6d5;
+  --term-black: #2c2925;
+  --term-red: #ef7d6a;
+  --term-green: #a9bb8a;
+  --term-yellow: #e9c46a;
+  --term-blue: #8fb3cf;
+  --term-magenta: #d3a0c4;
+  --term-cyan: #8ccfc0;
+  --term-white: #d9cfbf;
+}
+
+:root[data-theme="cream"] {
+  color-scheme: light;
+
+  --app-bg: #f5ead8;
+  --void: #f5ead8;
+  --panel: #ecdfc9;
+  --raised: #fcf5e9;
+  --float: #fffaf1;
+  --sunken: rgba(32, 30, 29, 0.05);
+  --well: #2a2724;
+
+  --fill-1: rgba(32, 30, 29, 0.04);
+  --fill-2: rgba(32, 30, 29, 0.07);
+  --fill-3: rgba(32, 30, 29, 0.11);
+  --fill-4: rgba(32, 30, 29, 0.2);
+
+  --line: rgba(32, 30, 29, 0.1);
+  --line-strong: rgba(32, 30, 29, 0.2);
+
+  --text: #201e1d;
+  --text-dim: #5e564c;
+  --text-faint: #8e8475;
+
+  --accent: #bf6730;
+  --accent-soft: rgba(198, 113, 57, 0.14);
+  --accent-ink: #fff8ee;
+  --live: #66774b;
+  --live-soft: rgba(122, 138, 94, 0.16);
+  --busy: #b85a22;
+  --busy-soft: rgba(198, 113, 57, 0.13);
+  --alert: #b93a2b;
+  --alert-soft: rgba(185, 58, 43, 0.1);
+  --add-soft: rgba(122, 138, 94, 0.16);
+
+  --shadow-1: 0 1px 2px rgba(60, 40, 20, 0.08);
+  --shadow-2: 0 24px 56px -22px rgba(60, 40, 20, 0.32);
+
+  --term-bg: #2a2724;
+  --term-fg: #f0e6d5;
+  --term-black: #3a3631;
+  --term-red: #ef7d6a;
+  --term-green: #a9bb8a;
+  --term-yellow: #e9c46a;
+  --term-blue: #8fb3cf;
+  --term-magenta: #d3a0c4;
+  --term-cyan: #8ccfc0;
+  --term-white: #d9cfbf;
+}
+
 :root[data-theme="night"] {
   color-scheme: dark;
 
@@ -384,12 +485,20 @@
   --term-white: #5d6675;
 }
 
+/* The older palettes predate these two tokens. */
+:root:not([data-theme="walnut"]):not([data-theme="cream"]) {
+  --well: var(--term-bg);
+  --live-soft: var(--add-soft);
+}
+
 /* ================================================================ base == */
 
 :root {
   --radius: 10px;
-  --radius-lg: 14px;
+  --radius-lg: 16px;
   --titlebar-h: 40px;
+  --strip-h: 44px;
+  --font-heading: "Caprasimo", "Figtree Variable", Georgia, serif;
 }
 
 html,
@@ -408,7 +517,7 @@ html {
 body {
   background: transparent;
   font-family:
-    "Instrument Sans Variable", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Figtree Variable", -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
   -webkit-font-smoothing: antialiased;
   font-size: 13px;
@@ -492,6 +601,76 @@ body {
 .cx-icon-btn[data-on="true"] {
   background: var(--fill-2);
   color: var(--text);
+}
+
+/* Pills: the strip's tabs, filters, and every small action. */
+.cx-pill {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  transition:
+    background-color 0.12s,
+    color 0.12s;
+}
+.cx-pill:hover {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.cx-pill[data-on="true"] {
+  background: var(--fill-3);
+  color: var(--text);
+}
+.cx-pill-line {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.cx-btn-primary {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-family: var(--font-heading);
+  font-size: 13px;
+  transition: filter 0.12s;
+}
+.cx-btn-primary:hover {
+  filter: brightness(1.08);
+}
+.cx-btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cx-chip-add {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  transition: filter 0.12s;
+}
+.cx-chip-add:hover {
+  filter: brightness(1.15);
+}
+
+.font-heading {
+  font-family: var(--font-heading);
+  font-weight: 400;
+  letter-spacing: 0.005em;
 }
 
 .cx-kbd {
@@ -695,4 +874,9 @@ button:focus-visible,
 }
 .cosmos-prose th {
   background: var(--fill-1);
+}
+
+.cx-pill-line[data-on="true"] {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }

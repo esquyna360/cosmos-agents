@@ -38,6 +38,12 @@ export interface Runner {
   mode: RunnerMode;
   /// The name was machine-written and may be replaced by an auto-title.
   nameAuto: boolean;
+  /// Where it runs. Empty means the project's default; a worktree fills it.
+  cwd: string;
+  /// Branch of the worktree Cosmos made for it, when it has one.
+  branch: string;
+  /// What it was asked to do when it was created.
+  task: string;
 }
 
 interface ProjectSnake {
@@ -64,6 +70,9 @@ interface RunnerSnake {
   session_id: string;
   mode?: string;
   name_auto?: boolean;
+  cwd?: string;
+  branch?: string;
+  task?: string;
 }
 
 function projectFromSnake(r: ProjectSnake): Project {
@@ -93,6 +102,9 @@ function runnerFromSnake(r: RunnerSnake): Runner {
     sessionId: r.session_id ?? "",
     mode: r.mode === "chat" ? "chat" : "tty",
     nameAuto: !!r.name_auto,
+    cwd: r.cwd ?? "",
+    branch: r.branch ?? "",
+    task: r.task ?? "",
   };
 }
 
@@ -138,6 +150,10 @@ export async function runnersCreate(opts: {
   env?: Record<string, string>;
   mode?: RunnerMode;
   nameAuto?: boolean;
+  cwd?: string;
+  task?: string;
+  /// Make a git worktree off the project's first folder and run there.
+  worktree?: boolean;
 }): Promise<Runner> {
   const r = await invoke<RunnerSnake>("runners_create", {
     mode: opts.mode ?? null,
@@ -148,6 +164,9 @@ export async function runnersCreate(opts: {
     program: opts.program ?? null,
     args: opts.args ?? null,
     env: opts.env ?? null,
+    cwd: opts.cwd ?? null,
+    task: opts.task ?? null,
+    worktree: opts.worktree ?? false,
   });
   return runnerFromSnake(r);
 }
@@ -155,6 +174,25 @@ export async function runnersCreate(opts: {
 /// `auto` marks a machine-written title, which a later auto-title may replace.
 export function runnersUpdate(id: string, name: string, auto = false): Promise<void> {
   return invoke("runners_update", { id, name, auto });
+}
+
+export function runnersTouch(id: string): Promise<void> {
+  return invoke("runners_touch", { id });
+}
+
+export function runnersSetTask(id: string, task: string): Promise<void> {
+  return invoke("runners_set_task", { id, task });
+}
+
+export interface GitInfo {
+  path: string;
+  isRepo: boolean;
+  branch: string | null;
+  worktrees: number;
+}
+
+export function gitInfo(paths: string[]): Promise<GitInfo[]> {
+  return invoke<GitInfo[]>("git_info", { paths });
 }
 
 export function runnersSetMode(id: string, mode: RunnerMode): Promise<void> {

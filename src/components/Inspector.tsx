@@ -2,12 +2,13 @@ import { createEffect, For, on, Show } from "solid-js";
 import { Code, FolderOpen, X } from "lucide-solid";
 
 import { chatOf, refreshContext } from "../stores/chat";
-import { isChat, type ProjectUI, type RunnerUI } from "../stores/projects";
-import { inspector, setInspector } from "../stores/layout";
+import { isChat, openFileInEditor, type ProjectUI, type RunnerUI } from "../stores/projects";
+import { inspector, setInspector, type InspectorTab } from "../stores/layout";
 import { openPath } from "../lib/projects";
 import { shortPath } from "../lib/toolDisplay";
 import { prettyModel } from "./chat/Composer";
 import DiffView from "./DiffView";
+import FileTree from "./FileTree";
 
 interface Props {
   project: ProjectUI;
@@ -25,7 +26,8 @@ const WINDOW_LABEL: Record<string, string> = {
 export default function Inspector(props: Props) {
   return (
     <aside class="flex w-[400px] max-w-[45%] shrink-0 flex-col border-l border-line bg-panel">
-      <div class="flex h-[46px] shrink-0 items-center gap-1 border-b border-line px-2.5">
+      <div class="flex h-[40px] shrink-0 items-center gap-0.5 border-b border-line px-2">
+        <Tab id="files" label="Arquivos" />
         <Tab id="changes" label="Mudanças" />
         <Show when={props.runner && isChat(props.runner)}>
           <Tab id="context" label="Contexto" />
@@ -34,9 +36,18 @@ export default function Inspector(props: Props) {
           <X size={14} />
         </button>
       </div>
+      <Show when={inspector() === "files"}>
+        <div class="min-h-0 flex-1 overflow-y-auto">
+          <FileTree
+            roots={props.runner?.cwd ? [props.runner.cwd] : props.project.folders}
+            onOpenFile={openFileInEditor}
+            selectedPath={null}
+          />
+        </div>
+      </Show>
       <Show when={inspector() === "changes"}>
         <div class="flex min-h-0 flex-1 flex-col">
-          <DiffView roots={props.project.folders} />
+          <DiffView roots={props.runner?.cwd ? [props.runner.cwd] : props.project.folders} />
         </div>
       </Show>
       <Show when={inspector() === "context" && props.runner} keyed>
@@ -46,14 +57,11 @@ export default function Inspector(props: Props) {
   );
 }
 
-function Tab(props: { id: "changes" | "context"; label: string }) {
+function Tab(props: { id: InspectorTab; label: string }) {
   return (
     <button
-      class="rounded-md px-2.5 py-1 text-[12.5px] transition"
-      classList={{
-        "bg-fill-2 text-ink": inspector() === props.id,
-        "text-faint hover:text-ink": inspector() !== props.id,
-      }}
+      class="cx-pill !h-[26px]"
+      data-on={inspector() === props.id}
       onClick={() => setInspector(props.id)}
     >
       {props.label}

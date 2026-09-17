@@ -1,3 +1,4 @@
+import { isMasterProject } from "../../stores/projects";
 import { createEffect, createMemo, createSignal, For, Match, on, onMount, Show, Switch } from "solid-js";
 import { ArrowDown, ChevronRight, X } from "lucide-solid";
 
@@ -159,9 +160,13 @@ export default function ChatView(props: Props) {
       </Show>
 
       <div class="mx-auto flex w-full max-w-[760px] shrink-0 flex-col gap-2 px-5 pb-4">
-        <For each={chat().pending}>
-          {(req) => <RequestCard runnerId={props.runner.id} request={req} roots={props.project.folders} />}
-        </For>
+        <Show when={chat().pending.length > 0}>
+          <div class="flex max-h-[58vh] flex-col gap-2 overflow-y-auto">
+            <For each={chat().pending}>
+              {(req) => <RequestCard runnerId={props.runner.id} request={req} roots={props.project.folders} />}
+            </For>
+          </div>
+        </Show>
         <Composer
           runnerId={props.runner.id}
           roots={props.project.folders}
@@ -196,9 +201,13 @@ function Thinking(props: { text: string; streaming: boolean }) {
 function Blank(props: { project: ProjectUI }) {
   return (
     <div class="flex flex-col gap-1 pb-2 pt-[18vh]">
-      <p class="text-[19px] font-medium tracking-[-0.01em] text-ink">O que vamos fazer em {props.project.name}?</p>
+      <p class="font-heading text-[22px] text-ink">
+        {isMasterProject(props.project) ? "O que você precisa?" : `O que vamos fazer em ${props.project.name}?`}
+      </p>
       <p class="text-[13px] text-dim">
-        A sessão ganha um nome sozinha depois da primeira mensagem.
+        {isMasterProject(props.project)
+          ? "Daqui saem projetos, agentes e terminais. Escreva o que quer ou use uma sugestão acima."
+          : "O agente ganha um nome sozinho depois da primeira mensagem."}
       </p>
     </div>
   );

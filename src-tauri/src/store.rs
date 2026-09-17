@@ -72,6 +72,12 @@ pub struct RunnerRow {
     /// True while the name is machine-written, so an auto-title may replace
     /// it. A rename by hand clears it.
     pub name_auto: bool,
+    /// Working directory override. Empty = the project's default.
+    pub cwd: String,
+    /// Branch of the git worktree this runner owns. Empty = none.
+    pub branch: String,
+    /// What the runner was asked to do, shown next to its name.
+    pub task: String,
 }
 
 impl Store {
@@ -165,6 +171,9 @@ impl Store {
         }
         if user_version < 5 {
             Self::migrate_v4_to_v5(&mut conn)?;
+        }
+        if user_version < 6 {
+            Self::migrate_v5_to_v6(&mut conn)?;
         }
         Ok(())
     }
@@ -412,6 +421,18 @@ impl Store {
         Ok(())
     }
 
+    /// v5 → v6: a runner can work somewhere other than the project's default
+    /// dir (its own git worktree) and carries the task it was created for.
+    fn migrate_v5_to_v6(conn: &mut Connection) -> Result<()> {
+        let tx = conn.transaction()?;
+        Self::ensure_column(&tx, "runners", "cwd", "TEXT NOT NULL DEFAULT ''")?;
+        Self::ensure_column(&tx, "runners", "branch", "TEXT NOT NULL DEFAULT ''")?;
+        Self::ensure_column(&tx, "runners", "task", "TEXT NOT NULL DEFAULT ''")?;
+        tx.execute_batch("PRAGMA user_version = 6")?;
+        tx.commit().context("committing v5→v6 migration")?;
+        Ok(())
+    }
+
     /// Writes a new order for the given ids. Anything not named keeps its
     /// slot at the end, so a stale list from the UI can't drop a row.
     pub fn reorder(&self, table: &str, ids: &[String]) -> Result<()> {
@@ -531,7 +552,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, project_id, kind, name, program, args_json, env_json, \
                     with_status_fsm, created_at, last_active, session_id, \
-                    mode, name_auto \
+                    mode, name_auto, cwd, branch, task \
              FROM runners ORDER BY position ASC, last_active DESC",
         )?;
         let rows = stmt
@@ -550,6 +571,9 @@ impl Store {
                     session_id: row.get(10)?,
                     mode: row.get(11)?,
                     name_auto: row.get::<_, i64>(12)? != 0,
+                    cwd: row.get(13)?,
+                    branch: row.get(14)?,
+                    task: row.get(15)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -561,7 +585,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, project_id, kind, name, program, args_json, env_json, \
                     with_status_fsm, created_at, last_active, session_id, \
-                    mode, name_auto \
+                    mode, name_auto, cwd, branch, task \
              FROM runners WHERE id = ?1",
         )?;
         let mut rows = stmt.query(params![id])?;
@@ -580,6 +604,9 @@ impl Store {
                 session_id: row.get(10)?,
                 mode: row.get(11)?,
                 name_auto: row.get::<_, i64>(12)? != 0,
+                cwd: row.get(13)?,
+                branch: row.get(14)?,
+                task: row.get(15)?,
             }))
         } else {
             Ok(None)
@@ -593,8 +620,9 @@ impl Store {
             INSERT INTO runners
                 (id, project_id, kind, name, program, args_json, env_json,
                  with_status_fsm, created_at, last_active, session_id, mode,
-                 name_auto, position)
+                 name_auto, cwd, branch, task, position)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
+                    ?14, ?15, ?16,
                     (SELECT COALESCE(MAX(position), -1) + 1 FROM runners))
             ON CONFLICT(id) DO UPDATE SET
                 project_id = excluded.project_id,
@@ -607,7 +635,10 @@ impl Store {
                 last_active = excluded.last_active,
                 session_id = excluded.session_id,
                 mode = excluded.mode,
-                name_auto = excluded.name_auto
+                name_auto = excluded.name_auto,
+                cwd = excluded.cwd,
+                branch = excluded.branch,
+                task = excluded.task
             "#,
             params![
                 row.id,
@@ -623,6 +654,9 @@ impl Store {
                 row.session_id,
                 row.mode,
                 row.name_auto as i64,
+                row.cwd,
+                row.branch,
+                row.task,
             ],
         )?;
         Ok(())
@@ -782,6 +816,55 @@ mod tests {
         assert!(store.runners_list().unwrap().is_empty());
         store.migrate(&home).unwrap();
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// v6 columns survive a round trip and default to empty.
+    #[test]
+    fn runner_worktree_columns_round_trip() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target/test-tmp")
+            .join(format!("cosmos-v6-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store::open(dir.join("db.sqlite")).unwrap();
+        store.migrate(&dir).unwrap();
+        store
+            .projects_upsert(&ProjectRow {
+                id: "p1".into(),
+                name: "P".into(),
+                slug: "p".into(),
+                folders_json: "[]".into(),
+                memory: "".into(),
+                cwd: "/x".into(),
+                created_at: 1,
+            })
+            .unwrap();
+        let mut row = RunnerRow {
+            id: "r1".into(),
+            project_id: "p1".into(),
+            kind: "agent".into(),
+            name: "a".into(),
+            program: "/bin/zsh".into(),
+            args_json: "[]".into(),
+            env_json: "{}".into(),
+            with_status_fsm: true,
+            created_at: 1,
+            last_active: 1,
+            session_id: "".into(),
+            mode: "chat".into(),
+            name_auto: false,
+            cwd: "".into(),
+            branch: "".into(),
+            task: "".into(),
+        };
+        store.runners_upsert(&row).unwrap();
+        assert_eq!(store.runners_get("r1").unwrap().unwrap().cwd, "");
+        row.cwd = "/wt".into();
+        row.branch = "cosmos/a".into();
+        row.task = "fix it".into();
+        store.runners_upsert(&row).unwrap();
+        let back = store.runners_list().unwrap().remove(0);
+        assert_eq!((back.cwd.as_str(), back.branch.as_str(), back.task.as_str()), ("/wt", "cosmos/a", "fix it"));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// `slugify` strips punctuation, lowercases, and kebab-cases. Empty input

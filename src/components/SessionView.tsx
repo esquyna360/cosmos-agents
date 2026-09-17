@@ -2,48 +2,42 @@ import { Show } from "solid-js";
 import {
   Columns2,
   Ellipsis,
-  FileText,
-  FolderOpen,
-  GitCompareArrows,
-  Globe,
+  FolderTree,
   Gauge,
+  GitBranch,
+  GitCompareArrows,
   MessageSquare,
-  Notebook,
-  PanelLeft,
-  Pencil,
-  Power,
-  RotateCcw,
   SquareTerminal,
-  Trash2,
 } from "lucide-solid";
 
 import {
-  deleteRunner,
+  cwdFor,
+  focusProject,
   isChat,
-  resetRunnerSession,
+  newTerminal,
   respawnTick,
   setRunnerMode,
-  stopRunner,
+  workFolder,
   type ProjectUI,
   type RunnerUI,
 } from "../stores/projects";
-import { renameSession } from "../stores/chat";
-import { inspector, setInspector, setView, sidebarOpen, toggleSidebar } from "../stores/layout";
+import { renameSession, statsOf } from "../stores/chat";
+import { branchOf } from "../stores/git";
+import { inspector, setInspector, type InspectorTab } from "../stores/layout";
 import { toggleSplit } from "../stores/panes";
-import { isClaudeRunner, openPath } from "../lib/projects";
-import InlineEdit, { startInlineEdit } from "./InlineEdit";
+import { isClaudeRunner } from "../lib/projects";
+import { shortPath } from "../lib/toolDisplay";
+import { prettyModel } from "./chat/Composer";
+import InlineEdit from "./InlineEdit";
 import Terminal from "./Terminal";
 import ChatView from "./chat/ChatView";
-import StatusGlyph, { glyphFor, GLYPH_LABEL } from "../ui/StatusGlyph";
+import StatusGlyph, { glyphFor, stateOf, TONE_TEXT } from "../ui/StatusGlyph";
 import { openMenu } from "../ui/Menu";
+import { runnerMenu } from "./menus";
 
 interface Props {
   project: ProjectUI;
   runner: RunnerUI;
-}
-
-export function cwdFor(project: ProjectUI, runner: RunnerUI): string {
-  return runner.kind === "shell" ? (project.folders[0] ?? project.cwd) : project.cwd;
 }
 
 /** The session itself, without chrome: a chat or a terminal. */
@@ -74,78 +68,79 @@ export default function SessionView(props: Props) {
   const r = () => props.runner;
   const editKey = () => `header:${r().id}`;
   const canChat = () => r().kind === "agent" && isClaudeRunner(r());
-
-  function more(e: MouseEvent) {
-    openMenu(e.currentTarget as HTMLElement, [
-      { label: "Renomear", icon: Pencil, onSelect: () => startInlineEdit(editKey()) },
-      { label: "Dividir a tela", icon: Columns2, hint: "⌘\\", onSelect: toggleSplit },
-      {
-        label: "Arquivos",
-        icon: FileText,
-        hint: "⌘E",
-        separatorBefore: true,
-        onSelect: () => setView("editor"),
-      },
-      { label: "Memória do projeto", icon: Notebook, onSelect: () => setView("memory") },
-      { label: "Navegador", icon: Globe, onSelect: () => setView("browser") },
-      {
-        label: "Abrir pasta no Finder",
-        icon: FolderOpen,
-        onSelect: () =>
-          openPath(props.project.folders[0] ?? props.project.cwd).catch(console.error),
-      },
-      {
-        label: r().live ? "Parar" : "Já está parada",
-        icon: Power,
-        hint: "⌘W",
-        disabled: !r().live,
-        separatorBefore: true,
-        onSelect: () => void stopRunner(r().id),
-      },
-      {
-        label: "Começar conversa do zero",
-        icon: RotateCcw,
-        disabled: r().kind !== "agent",
-        onSelect: () => void resetRunnerSession(r().id),
-      },
-      { label: "Excluir sessão", icon: Trash2, danger: true, onSelect: () => void deleteRunner(r().id) },
-    ]);
-  }
+  const state = () => stateOf(r());
+  const branch = () => branchOf(props.project, r());
+  const stats = () => (r().kind === "agent" ? statsOf(r().id) : null);
+  const pct = () => {
+    const s = stats();
+    return s && s.contextWindow > 0 ? Math.min(100, Math.round((s.contextTokens / s.contextWindow) * 100)) : null;
+  };
+  const panel = (id: InspectorTab) => setInspector(inspector() === id ? null : id);
 
   return (
     <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-      <header
-        data-tauri-drag-region
-        class="flex h-[46px] shrink-0 items-center gap-2 border-b border-line bg-void pr-3"
-        classList={{ "pl-[84px]": !sidebarOpen(), "pl-4": sidebarOpen() }}
-      >
-        <Show when={!sidebarOpen()}>
-          <button class="cx-icon-btn" onClick={toggleSidebar} title="Mostrar barra lateral (⌘B)">
-            <PanelLeft size={15} />
-          </button>
-        </Show>
-        <span title={GLYPH_LABEL[glyphFor(r())]} class="flex shrink-0">
-          <StatusGlyph glyph={glyphFor(r())} />
-        </span>
-        <div class="flex min-w-0 items-baseline gap-2">
-          <span class="min-w-0 truncate text-[13.5px] font-medium text-ink">
-            <InlineEdit
-              value={r().name}
-              editKey={editKey()}
-              onCommit={(next) => {
-                const t = next.trim();
-                if (t && t !== r().name) renameSession(r().id, t).catch(console.error);
-              }}
+      <header class="flex shrink-0 items-center gap-4 border-b border-line px-5 py-2.5">
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2">
+            <StatusGlyph glyph={glyphFor(r())} />
+            <h1
+              class="min-w-0 truncate text-[17px] leading-tight text-ink"
+              classList={{ "font-heading": r().kind === "agent", "font-mono text-[14px]": r().kind === "shell" }}
             >
-              {(name) => <span class="truncate">{name}</span>}
-            </InlineEdit>
-          </span>
-          <span class="shrink-0 truncate text-[12px] text-faint">{props.project.name}</span>
+              <InlineEdit
+                value={r().name}
+                editKey={editKey()}
+                onCommit={(next) => {
+                  const t = next.trim();
+                  if (t && t !== r().name) renameSession(r().id, t).catch(console.error);
+                }}
+              >
+                {(name) => <span class="truncate">{name}</span>}
+              </InlineEdit>
+            </h1>
+            <span class={`shrink-0 text-[12px] ${TONE_TEXT[state().tone]}`}>{state().label}</span>
+          </div>
+          <div class="mt-1 flex min-w-0 items-center gap-2.5 text-[11.5px] text-faint">
+            <button class="shrink-0 text-dim hover:text-accent" onClick={() => focusProject(props.project.id)}>
+              {props.project.name}
+            </button>
+            <Show when={branch()}>
+              <span class="flex shrink-0 items-center gap-1 font-mono text-[11px]" title={r().cwd ? "Worktree própria" : "Checkout principal"}>
+                <GitBranch size={11} />
+                {branch()}
+              </span>
+            </Show>
+            <span class="min-w-0 truncate font-mono text-[11px]" title={workFolder(props.project, r())}>
+              {shortPath(workFolder(props.project, r()), [])}
+            </span>
+            <Show when={pct() !== null}>
+              <button
+                class="flex shrink-0 items-center gap-1.5 hover:text-dim"
+                title="Contexto usado"
+                onClick={() => panel("context")}
+              >
+                <span class="h-1 w-[52px] overflow-hidden rounded-full bg-fill-2">
+                  <span
+                    class="block h-full rounded-full"
+                    classList={{ "bg-live": pct()! < 80, "bg-busy": pct()! >= 80 }}
+                    style={{ width: `${pct()}%` }}
+                  />
+                </span>
+                <span class="tabular-nums">{pct()}%</span>
+              </button>
+            </Show>
+            <Show when={stats() && stats()!.costUsd > 0}>
+              <span class="shrink-0 tabular-nums">${stats()!.costUsd.toFixed(2)}</span>
+            </Show>
+            <Show when={stats()?.model}>
+              <span class="shrink-0">{prettyModel(stats()!.model)}</span>
+            </Show>
+          </div>
         </div>
 
-        <div class="ml-auto flex shrink-0 items-center gap-1">
+        <div class="flex shrink-0 items-center gap-1">
           <Show when={canChat()}>
-            <div class="mr-1 flex rounded-md border border-line p-0.5" role="group" aria-label="Modo da sessão">
+            <div class="mr-1 flex rounded-full border border-line p-0.5" role="group" aria-label="Modo da sessão">
               <ModeButton
                 on={r().mode === "chat"}
                 label="Chat"
@@ -161,9 +156,20 @@ export default function SessionView(props: Props) {
             </div>
           </Show>
           <button
+            class="cx-pill"
+            onClick={() => void newTerminal(props.project.id, { cwd: workFolder(props.project, r()) })}
+            title="Abre um terminal na pasta deste agente"
+          >
+            <SquareTerminal size={12} />
+            Shell aqui
+          </button>
+          <button class="cx-icon-btn" data-on={inspector() === "files"} onClick={() => panel("files")} title="Arquivos">
+            <FolderTree size={15} />
+          </button>
+          <button
             class="cx-icon-btn"
             data-on={inspector() === "changes"}
-            onClick={() => setInspector(inspector() === "changes" ? null : "changes")}
+            onClick={() => panel("changes")}
             title="Mudanças no código"
           >
             <GitCompareArrows size={15} />
@@ -172,13 +178,23 @@ export default function SessionView(props: Props) {
             <button
               class="cx-icon-btn"
               data-on={inspector() === "context"}
-              onClick={() => setInspector(inspector() === "context" ? null : "context")}
+              onClick={() => panel("context")}
               title="Contexto e custo"
             >
               <Gauge size={15} />
             </button>
           </Show>
-          <button class="cx-icon-btn" onClick={more} title="Mais" aria-label="Mais ações">
+          <button
+            class="cx-icon-btn"
+            title="Mais"
+            aria-label="Mais ações"
+            onClick={(e) =>
+              openMenu(e.currentTarget, [
+                ...runnerMenu(props.project, r(), editKey()),
+                { label: "Dividir a tela", icon: Columns2, hint: "⌘\\", separatorBefore: true, onSelect: toggleSplit },
+              ])
+            }
+          >
             <Ellipsis size={15} />
           </button>
         </div>
@@ -196,7 +212,7 @@ function ModeButton(props: {
 }) {
   return (
     <button
-      class="flex items-center gap-1.5 rounded px-2 py-[3px] text-[12px] transition"
+      class="flex items-center gap-1.5 rounded-full px-2.5 py-[3px] text-[12px] transition"
       classList={{
         "bg-fill-3 text-ink": props.on,
         "text-faint hover:text-ink": !props.on,

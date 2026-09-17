@@ -43,6 +43,15 @@ pub struct RunnerRecord {
     pub mode: String,
     #[serde(default)]
     pub name_auto: bool,
+    /// Working directory override (a git worktree). Empty = project default.
+    #[serde(default)]
+    pub cwd: String,
+    /// Branch of the worktree this runner owns. Empty = none.
+    #[serde(default)]
+    pub branch: String,
+    /// What the runner was asked to do.
+    #[serde(default)]
+    pub task: String,
 }
 
 fn default_mode() -> String {
@@ -313,15 +322,24 @@ Always use absolute paths when reading or editing files inside them.\n\n",
 new project from this session, use the `cosmos` CLI (already on PATH):\n\n",
     );
     out.push_str("```sh\n");
-    out.push_str("# New sibling agent in this project (auto-starts):\n");
-    out.push_str("cosmos runner add --project . --name \"<name>\"\n\n");
+    out.push_str("# New sibling agent in this project. --task is its first message;\n");
+    out.push_str("# --worktree gives it its own git worktree and branch instead of the\n");
+    out.push_str("# shared checkout; --tty runs it as a terminal instead of a chat:\n");
+    out.push_str(
+        "cosmos runner add --project . --name \"<name>\" [--task \"<what to do>\"] [--worktree] [--tty]\n\n",
+    );
     out.push_str("# New project, optionally with an agent inside:\n");
     out.push_str(
-        "cosmos project add --name \"<name>\" --folder /abs/path [--folder ...] \\\n  --with-agent \"<agent-name>\"\n\n",
+        "cosmos project add --name \"<name>\" --folder /abs/path [--folder ...] \\\n  [--with-agent \"<agent-name>\" [--task \"<what to do>\"]]\n\n",
     );
-    out.push_str("# Read-only listing:\n");
+    out.push_str("# Who is working, stopped or waiting for an answer, across every project:\n");
+    out.push_str("cosmos status\n");
     out.push_str("cosmos project list\n");
     out.push_str("cosmos runner list --project .\n\n");
+    out.push_str("# Talk to, stop or rename an agent (--id works instead of --name):\n");
+    out.push_str("cosmos runner send --project . --name \"<name>\" --message \"<text>\"\n");
+    out.push_str("cosmos runner stop --project . --name \"<name>\"\n");
+    out.push_str("cosmos runner rename --project . --name \"<name>\" --to \"<new name>\"\n\n");
     out.push_str("# Removal (destructive — needs --yes):\n");
     out.push_str("cosmos runner rm --project . --name \"<name>\" --yes\n");
     out.push_str("cosmos project rm --project \"<slug>\" --yes\n\n");
@@ -331,7 +349,7 @@ new project from this session, use the `cosmos` CLI (already on PATH):\n\n",
     out.push_str("```\n\n");
     out.push_str(
         "`--project .` resolves to this project via `$COSMOS_PROJECT_SLUG`. \
-The new agent appears in the sidebar but does **not** steal focus.\n",
+The new agent appears in the app but does **not** steal focus.\n",
     );
 
     // For each folder that already has its own CLAUDE.md, @-include it so the
@@ -451,6 +469,9 @@ pub fn runner_row_to_record(row: RunnerRow) -> Result<RunnerRecord> {
         session_id: row.session_id,
         mode: row.mode,
         name_auto: row.name_auto,
+        cwd: row.cwd,
+        branch: row.branch,
+        task: row.task,
     })
 }
 
@@ -471,6 +492,9 @@ pub fn runner_record_to_row(rec: &RunnerRecord) -> Result<RunnerRow> {
         session_id: rec.session_id.clone(),
         mode: rec.mode.clone(),
         name_auto: rec.name_auto,
+        cwd: rec.cwd.clone(),
+        branch: rec.branch.clone(),
+        task: rec.task.clone(),
     })
 }
 
@@ -743,6 +767,77 @@ pub fn chat_args_for(home: &Path, rec: &RunnerRecord, cwd: &str, opts: &ChatOpti
         .collect()
 }
 
+/// Where a runner actually works. An explicit `cwd` (its own git worktree)
+/// wins; otherwise agents run from the project's synthetic dir and shells
+/// land in the first real folder.
+pub fn runner_cwd(project: &ProjectRecord, rec: &RunnerRecord) -> String {
+    if !rec.cwd.is_empty() {
+        return rec.cwd.clone();
+    }
+    if rec.kind == "shell" {
+        return project
+            .folders
+            .first()
+            .cloned()
+            .unwrap_or_else(|| project.cwd.clone());
+    }
+    project.cwd.clone()
+}
+
+fn claude_line_index(rec: &RunnerRecord) -> Option<usize> {
+    rec.args.iter().position(|a| a.contains(CLAUDE_NEEDLE))
+}
+
+/// An agent working from its own worktree never sees the project's generated
+/// CLAUDE.md, so it is handed over as extra system prompt instead. `args` is
+/// the output of `spawn_args_for` / `chat_args_for` for the same record.
+pub fn with_project_memory(
+    mut args: Vec<String>,
+    home: &Path,
+    slug: &str,
+    rec: &RunnerRecord,
+) -> Vec<String> {
+    #[cfg(unix)]
+    {
+        let dir = project_dir(home, slug);
+        if rec.kind != "agent"
+            || slug.is_empty()
+            || rec.cwd.is_empty()
+            || Path::new(&rec.cwd) == dir
+        {
+            return args;
+        }
+        let md = dir.join(".claude").join("CLAUDE.md");
+        if !md.exists() {
+            return args;
+        }
+        if let Some(line) = claude_line_index(rec).and_then(|i| args.get_mut(i)) {
+            line.push_str(" --append-system-prompt \"$(cat ");
+            line.push_str(&shell_quote(&md.to_string_lossy()));
+            line.push_str(")\"");
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (home, slug, rec);
+    }
+    args
+}
+
+/// Appends a first prompt to an interactive claude line, so a terminal agent
+/// created with a task starts on it.
+pub fn with_initial_prompt(mut args: Vec<String>, rec: &RunnerRecord, prompt: &str) -> Vec<String> {
+    let prompt = prompt.trim();
+    if prompt.is_empty() {
+        return args;
+    }
+    if let Some(line) = claude_line_index(rec).and_then(|i| args.get_mut(i)) {
+        line.push(' ');
+        line.push_str(&shell_quote(prompt));
+    }
+    args
+}
+
 /// without persisting or spawning. Caller is responsible for upsert + PTY
 /// spawn. Pulled out so the IPC server and tauri commands share defaulting.
 pub fn build_runner_record(
@@ -787,6 +882,9 @@ pub fn build_runner_record(
         session_id,
         mode: default_mode(),
         name_auto: false,
+        cwd: String::new(),
+        branch: String::new(),
+        task: String::new(),
     }
 }
 
@@ -919,6 +1017,54 @@ mod tests {
         assert!(out[1].starts_with("exec claude -p --input-format stream-json"));
         assert!(out[1].ends_with("--permission-mode plan --model 'opus' --session-id s1"));
         assert!(!out[1].contains("--name"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn worktree_agents_get_the_project_memory_and_the_task() {
+        let home = fresh_home("wtmem");
+        let md = project_dir(&home, "proj").join(".claude");
+        std::fs::create_dir_all(&md).unwrap();
+        std::fs::write(md.join("CLAUDE.md"), "# x").unwrap();
+        let mut rec = build_runner_record(
+            "r".into(),
+            "p".into(),
+            "agent".into(),
+            "fix".into(),
+            None,
+            None,
+            None,
+            0,
+        );
+        let plain = with_project_memory(rec.args.clone(), &home, "proj", &rec);
+        assert_eq!(plain, rec.args, "no worktree, no extra prompt");
+        rec.cwd = "/somewhere/else".into();
+        let out = with_project_memory(rec.args.clone(), &home, "proj", &rec);
+        let line = out.last().unwrap();
+        assert!(line.contains("--append-system-prompt \"$(cat '"));
+        let out = with_initial_prompt(out, &rec, "it's broken");
+        assert!(out.last().unwrap().ends_with(" 'it'\\''s broken'"));
+    }
+
+    #[test]
+    fn runner_cwd_prefers_the_worktree() {
+        let project = ProjectRecord {
+            id: "p".into(),
+            name: "P".into(),
+            slug: "p".into(),
+            folders: vec!["/repo".into()],
+            memory: String::new(),
+            cwd: "/synthetic".into(),
+            created_at: 0,
+        };
+        let mut agent =
+            build_runner_record("a".into(), "p".into(), "agent".into(), "a".into(), None, None, None, 0);
+        let shell =
+            build_runner_record("s".into(), "p".into(), "shell".into(), "s".into(), None, None, None, 0);
+        assert_eq!(runner_cwd(&project, &agent), "/synthetic");
+        assert_eq!(runner_cwd(&project, &shell), "/repo");
+        agent.cwd = "/wt".into();
+        assert_eq!(runner_cwd(&project, &agent), "/wt");
     }
 
     #[test]

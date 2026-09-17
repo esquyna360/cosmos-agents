@@ -1,10 +1,12 @@
 import { createSignal } from "solid-js";
 
-export interface CreatorState {
-  mode: "project";
-  /** Edit-mode flag — load existing project's name/folders/memory. */
-  editingProjectId?: string;
-}
+export type CreatorState =
+  /** Add a project: a folder and a name. */
+  | { mode: "project" }
+  /** Folders, memory and deletion of an existing project. */
+  | { mode: "project"; editingProjectId: string }
+  /** Add an agent, optionally with the project already picked. */
+  | { mode: "agent"; projectId?: string };
 
 const [state, setState] = createSignal<CreatorState | null>(null);
 export const creator = state;

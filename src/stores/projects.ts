@@ -15,6 +15,7 @@ import {
   runnersResetSession,
   runnersSetMode,
   runnersStop,
+  runnersTouch,
   runnersUpdate,
   isClaudeRunner,
   type Project,
@@ -34,6 +35,7 @@ import {
 import { agentKill } from "../lib/agent";
 import { activeSlot, forgetProject, revealRunner, slotsFor } from "./panes";
 import { fsClaudeMd, fsDetectStack, type StackInfo } from "../lib/fs";
+import { go, pruneTabs, route } from "./nav";
 
 /// UI-shape runner: persisted fields + live/derived status.
 export interface RunnerUI extends Runner {
@@ -193,28 +195,65 @@ export function consumePendingRename(id: string): void {
 export const projectsStore = state;
 export const focusedProjectId = focusedProjectIdSignal;
 
-export const focusedProject = createMemo<ProjectUI | null>(
-  () => state.list.find((p) => p.id === focusedProjectIdSignal()) ?? null,
+/// Kept in sync with `master::MASTER_NAME` on the Rust side.
+const MASTER_NAME = "geral";
+
+/// The always-on project behind the Hub, and the one agent in it that is the Hub.
+export const masterProject = createMemo<ProjectUI | null>(
+  () => state.list.find((p) => p.name.trim().toLowerCase() === MASTER_NAME) ?? null,
+);
+export const masterRunner = createMemo<RunnerUI | null>(
+  () =>
+    masterProject()?.runners.find(
+      (r) => r.kind === "agent" && r.name.trim().toLowerCase() === MASTER_NAME,
+    ) ??
+    masterProject()?.runners.find((r) => r.kind === "agent") ??
+    null,
 );
 
-/// The runner the composer, ⌘W and the status bar act on: whatever sits in
-/// the active pane, falling back to the project's first runner when the grid
-/// still has an empty slot selected.
+/// The project that ⌘N, ⌘P and the project tools act on: the one on screen,
+/// or the last one that was, while Crew or Board is showing.
+export const focusedProject = createMemo<ProjectUI | null>(() => {
+  const r = route();
+  if (r.kind === "hub") return masterProject();
+  const id = r.kind === "project" || r.kind === "session" ? r.projectId : focusedProjectIdSignal();
+  return state.list.find((p) => p.id === id) ?? null;
+});
+
+/// The runner ⌘W and ⌘J act on, and the one whose turns don't count as
+/// unread. Nothing is focused while an overview is on screen.
 export const focusedRunner = createMemo<RunnerUI | null>(() => {
-  const p = focusedProject();
+  const r = route();
+  if (r.kind === "hub") return masterRunner();
+  if (r.kind !== "session") return null;
+  const p = state.list.find((x) => x.id === r.projectId);
   if (!p) return null;
-  const slots = slotsFor(p.id);
-  const inSlot = slots[activeSlot()] ?? null;
-  return (
-    p.runners.find((r) => r.id === inSlot) ??
-    p.runners.find((r) => r.id === slots.find(Boolean)) ??
-    p.runners[0] ??
-    null
-  );
+  const inSlot = slotsFor(p.id)[activeSlot()] ?? null;
+  return p.runners.find((x) => x.id === inSlot) ?? p.runners.find((x) => x.id === r.runnerId) ?? null;
 });
 
 export function focusProject(id: string): void {
   setFocusedProjectIdSignal(id);
+  go({ kind: "project", projectId: id });
+}
+
+/** Where a runner's process starts. Agents on the main checkout sit in the
+ *  project's generated dir, where its CLAUDE.md lives. */
+export function cwdFor(project: ProjectUI, runner: { kind: RunnerKind; cwd: string }): string {
+  if (runner.cwd) return runner.cwd;
+  return runner.kind === "shell" ? (project.folders[0] ?? project.cwd) : project.cwd;
+}
+
+/** The real folder a runner works on: what Finder, git and "shell here" want. */
+export function workFolder(project: ProjectUI, runner?: { cwd: string } | null): string {
+  return runner?.cwd || project.folders[0] || project.cwd;
+}
+
+const STALE_AFTER_S = 3 * 86_400;
+
+/** Stopped, seen, and untouched for days: kept, but out of the way. */
+export function isStale(r: RunnerUI): boolean {
+  return !r.live && !r.unread && Date.now() / 1000 - r.lastActive > STALE_AFTER_S;
 }
 
 /**
@@ -225,6 +264,11 @@ export function focusProject(id: string): void {
 export function focusRunner(projectId: string, runnerId: string): void {
   setFocusedProjectIdSignal(projectId);
   revealRunner(projectId, runnerId);
+  go(
+    masterRunner()?.id === runnerId
+      ? { kind: "hub" }
+      : { kind: "session", projectId, runnerId },
+  );
   const proj = state.list.find((p) => p.id === projectId);
   const runner = proj?.runners.find((r) => r.id === runnerId);
   if (!runner) return;
@@ -342,9 +386,6 @@ export function migrateLegacyLocalStorage(): void {
 
 /* ------------------------------ loader ----------------------------------- */
 
-/// Kept in sync with `master::MASTER_NAME` on the Rust side.
-const MASTER_NAME = "geral";
-
 export async function loadProjects(): Promise<void> {
   const [projects, runners, live] = await Promise.all([
     projectsList(),
@@ -385,12 +426,15 @@ export async function loadProjects(): Promise<void> {
   }
   const list = Array.from(projectsById.values());
   setState("list", list);
+  pruneTabs(list.map((p) => p.id));
 
-  if (list.length > 0 && focusedProjectIdSignal() === null) {
-    // The master agent owns the first screen: Cosmos opens on `geral`, not on
-    // whichever project happens to sort first.
-    const master = list.find((p) => p.name.toLowerCase() === MASTER_NAME);
-    setFocusedProjectIdSignal((master ?? list[0]).id);
+  // A stored route can point at something deleted since.
+  const r = route();
+  if (r.kind === "project" || r.kind === "session") {
+    const p = list.find((x) => x.id === r.projectId);
+    if (!p) go({ kind: "crew" });
+    else if (r.kind === "session" && !p.runners.some((x) => x.id === r.runnerId))
+      go({ kind: "project", projectId: p.id });
   }
 
   // Enrich each project's cwd asynchronously (stacks + CLAUDE.md).
@@ -447,6 +491,10 @@ export async function attachRunnerStatusListener(): Promise<void> {
     status: RunnerStatus;
   }>("runner-status", (e) => {
     const { projectId, runnerId, status } = e.payload;
+    const before = findRunner(runnerId)?.runner.status;
+    const finished =
+      status === "idle" && (before === "streaming" || before === "tool_running");
+    if (finished) runnersTouch(runnerId).catch(() => {});
     setState(
       "list",
       (p) => p.id === projectId,
@@ -456,6 +504,7 @@ export async function attachRunnerStatusListener(): Promise<void> {
         ...cur,
         status,
         live: status !== "exited",
+        lastActive: finished ? Math.floor(Date.now() / 1000) : cur.lastActive,
       }),
     );
     const proj = state.list.find((p) => p.id === projectId);
@@ -556,14 +605,24 @@ export async function createProjectWithAgent(opts: {
 
   ui.runners.push(runnerToUI(runner, !asChat));
   setState("list", (list) => [ui, ...list]);
-  setFocusedProjectIdSignal(project.id);
-  revealRunner(project.id, runner.id);
+  focusRunner(project.id, runner.id);
   enrich(project.cwd).then(({ stacks, claudeMd }) => {
     setState(
       "list",
       (p) => p.id === project.id,
       (cur) => ({ ...cur, stacks, claudeMd }),
     );
+  });
+  return ui;
+}
+
+/** A project is just its folders. Agents come after, one at a time. */
+export async function createProject(name: string, folders: string[]): Promise<ProjectUI> {
+  const project = await projectsCreate(name, folders, "");
+  const ui = toUI(project);
+  setState("list", (list) => [...list, ui]);
+  enrich(project.cwd).then(({ stacks, claudeMd }) => {
+    setState("list", (p) => p.id === project.id, (cur) => ({ ...cur, stacks, claudeMd }));
   });
   return ui;
 }
@@ -604,6 +663,7 @@ export async function createRunnerInProject(
     name,
     program: opts?.program,
     args: opts?.args,
+    cwd: opts?.cwd,
   });
   // Agents run from project.cwd (the synthetic ~/.cosmos/projects/<slug>/ dir)
   // so they read the generated CLAUDE.md with pinned cards + @-included repo
@@ -634,8 +694,7 @@ export async function createRunnerInProject(
     "runners",
     (rs) => [...rs, ui],
   );
-  setFocusedProjectIdSignal(projectId);
-  revealRunner(projectId, runner.id);
+  focusRunner(projectId, runner.id);
   setPendingRename(runner.id);
   return ui;
 }
@@ -669,28 +728,55 @@ const PLACEHOLDER_NAME = "Nova sessão";
  * A new Claude session, as a chat. Nothing is spawned: the process starts
  * with the first message, and Claude names the session from it.
  */
-export async function newSession(projectId: string): Promise<RunnerUI | null> {
-  const project = state.list.find((p) => p.id === projectId);
+export function newSession(projectId: string): Promise<RunnerUI | null> {
+  return newAgent({ projectId });
+}
+
+/**
+ * A new agent. Claude opens as a chat with no process behind it yet; the
+ * caller sends the task, which is what starts one. Any other CLI is a TUI and
+ * gets its terminal right away.
+ */
+export async function newAgent(opts: {
+  projectId: string;
+  name?: string;
+  task?: string;
+  worktree?: boolean;
+  program?: string;
+  args?: string[];
+}): Promise<RunnerUI | null> {
+  const project = state.list.find((p) => p.id === opts.projectId);
   if (!project) return null;
+  const asChat = !opts.args || isClaudeRunner({ kind: "agent", args: opts.args });
+  const typed = opts.name?.trim();
+  const fromTask = opts.task?.trim().split(/\s+/).slice(0, 6).join(" ");
   const runner = await runnersCreate({
-    projectId,
+    projectId: opts.projectId,
     kind: "agent",
-    name: PLACEHOLDER_NAME,
-    mode: "chat",
-    nameAuto: true,
+    name: typed || fromTask || PLACEHOLDER_NAME,
+    program: opts.program,
+    args: opts.args,
+    mode: asChat ? "chat" : "tty",
+    nameAuto: asChat && !typed,
+    task: opts.task?.trim(),
+    worktree: opts.worktree,
   });
   const ui = runnerToUI(runner, false);
-  setState("list", (p) => p.id === projectId, "runners", (rs) => [...rs, ui]);
-  if (project.collapsed) toggleProjectCollapsed(projectId);
-  setFocusedProjectIdSignal(projectId);
-  revealRunner(projectId, runner.id);
+  setState("list", (p) => p.id === opts.projectId, "runners", (rs) => [...rs, ui]);
+  focusRunner(opts.projectId, runner.id);
   return ui;
 }
 
-export async function newTerminal(projectId: string): Promise<RunnerUI> {
+export async function newTerminal(
+  projectId: string,
+  opts?: { cwd?: string; name?: string },
+): Promise<RunnerUI> {
   const project = state.list.find((p) => p.id === projectId);
   const n = (project?.runners.filter((r) => r.kind === "shell").length ?? 0) + 1;
-  const ui = await createRunnerInProject(projectId, "shell", { name: `Terminal ${n}` });
+  const ui = await createRunnerInProject(projectId, "shell", {
+    name: opts?.name ?? `Terminal ${n}`,
+    cwd: opts?.cwd,
+  });
   consumePendingRename(ui.id);
   return ui;
 }
@@ -703,11 +789,22 @@ export async function newTerminal(projectId: string): Promise<RunnerUI> {
 export async function setRunnerMode(id: string, mode: RunnerMode): Promise<void> {
   const found = findRunner(id);
   if (!found || found.runner.kind !== "agent" || found.runner.mode === mode) return;
-  await agentKill(id).catch(() => {});
+  await killAgent(id);
   await ptyKill(id).catch(() => {});
   await runnersSetMode(id, mode);
   patchRunner(id, { mode, live: false, status: "idle" as RunnerStatus, activity: "" });
   if (mode === "tty") await restartRunner(id);
+}
+
+const killHooks: ((id: string) => void)[] = [];
+/** Lets the chat store know an exit is coming and was asked for. */
+export function onRunnerKill(fn: (id: string) => void): void {
+  killHooks.push(fn);
+}
+
+async function killAgent(id: string): Promise<void> {
+  for (const fn of killHooks) fn(id);
+  await agentKill(id).catch(() => {});
 }
 
 const resetHooks: ((id: string) => void)[] = [];
@@ -723,6 +820,7 @@ export function onRunnerReset(fn: (id: string) => void): void {
  * revived — the handle went with it.
  */
 export async function stopRunner(id: string): Promise<void> {
+  for (const fn of killHooks) fn(id);
   try {
     await runnersStop(id);
   } catch (e) {
@@ -743,7 +841,7 @@ export async function restartRunner(id: string): Promise<void> {
   const project = state.list.find((p) => p.runners.some((r) => r.id === id));
   const runner = project?.runners.find((r) => r.id === id);
   if (!project || !runner) return;
-  await agentKill(id).catch(() => {});
+  await killAgent(id);
   try {
     await ptyKill(id);
   } catch {
@@ -763,11 +861,10 @@ export async function restartRunner(id: string): Promise<void> {
   // Terminal remounts on the live flag flipping back and does the spawn, but
   // a runner that is already on screen won't remount — so spawn here too and
   // let the attach path in Terminal find a live PTY.
-  const cwd = runner.kind === "shell" ? (project.folders[0] ?? project.cwd) : project.cwd;
   try {
     await ptySpawn({
       id,
-      cwd,
+      cwd: cwdFor(project, runner),
       program: runner.program,
       args: runner.args,
       cols: 100,
@@ -811,6 +908,8 @@ export async function deleteRunner(id: string): Promise<void> {
     "runners",
     (rs) => rs.filter((r) => r.id !== id),
   );
+  const at = route();
+  if (at.kind === "session" && at.runnerId === id) go({ kind: "project", projectId: project.id });
   recomputePromotion();
 }
 
@@ -867,9 +966,10 @@ export async function deleteProject(id: string): Promise<void> {
   } catch {
     /* ignore */
   }
-  if (focusedProjectIdSignal() === id) {
-    setFocusedProjectIdSignal(state.list[0]?.id ?? null);
-  }
+  if (focusedProjectIdSignal() === id) setFocusedProjectIdSignal(null);
+  const at = route();
+  if ((at.kind === "project" || at.kind === "session") && at.projectId === id) go({ kind: "crew" });
+  pruneTabs(state.list.map((p) => p.id));
 }
 
 function recomputePromotion(): void {
@@ -896,7 +996,7 @@ export function markRunnerLive(id: string, live: boolean): void {
 
 export function focusByProjectIndex(idx: number): void {
   const p = state.list[idx];
-  if (p) setFocusedProjectIdSignal(p.id);
+  if (p) focusProject(p.id);
 }
 
 /* --------------------------- default-spawn helper ------------------------ */

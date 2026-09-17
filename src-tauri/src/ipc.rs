@@ -29,6 +29,9 @@ pub enum Request {
         /// name inside the new project. `None` = project shell only.
         #[serde(default)]
         with_agent: Option<String>,
+        /// First message for that agent.
+        #[serde(default)]
+        task: Option<String>,
     },
     /// Read-only listing.
     ProjectList,
@@ -40,6 +43,16 @@ pub enum Request {
         /// "agent" (default) or "shell".
         #[serde(default)]
         kind: Option<String>,
+        /// First message for the agent.
+        #[serde(default)]
+        task: Option<String>,
+        /// Give the agent its own git worktree and branch.
+        #[serde(default)]
+        worktree: bool,
+        /// Run the agent as a terminal (PTY, starts now) instead of a chat
+        /// (starts on its first message).
+        #[serde(default)]
+        tty: bool,
     },
     /// Read-only listing, optionally filtered by project slug or `.`.
     RunnerList {
@@ -65,6 +78,37 @@ pub enum Request {
         #[serde(default)]
         id: Option<String>,
     },
+    /// Hand a message to an agent: a chat gets it as a user turn, a live
+    /// terminal gets it typed in.
+    RunnerSend {
+        #[serde(default)]
+        project: Option<String>,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        id: Option<String>,
+        message: String,
+    },
+    /// Stop a runner's process; the row and its session stay.
+    RunnerStop {
+        #[serde(default)]
+        project: Option<String>,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        id: Option<String>,
+    },
+    RunnerRename {
+        #[serde(default)]
+        project: Option<String>,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        id: Option<String>,
+        to: String,
+    },
+    /// Every project with its runners and what each is doing.
+    Status,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

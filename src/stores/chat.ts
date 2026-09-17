@@ -35,10 +35,14 @@ import {
   type Usage,
 } from "../lib/claudeProtocol";
 import { activityLine } from "../lib/toolDisplay";
+import { runnersTouch } from "../lib/projects";
 import {
+  cwdFor,
   findRunner,
   focusedRunner,
+  loadProjects,
   markRunnerLive,
+  onRunnerKill,
   onRunnerReset,
   patchRunner,
   renameRunner,
@@ -156,6 +160,59 @@ const liveMessage = new Map<string, string>();
 const awaiting = new Map<string, { runnerId: string; what: "init" | "context" }>();
 /** A rename made in Cosmos that Claude's transcript doesn't reflect yet. */
 const pendingTitle = new Map<string, string>();
+/** Runners whose process Cosmos is stopping on purpose (mode switch, stop,
+ *  restart). Their exit is not news. */
+const expectedExit = new Set<string>();
+onRunnerKill((id) => {
+  const r = findRunner(id)?.runner;
+  if (r?.live && r.mode === "chat") expectedExit.add(id);
+});
+
+function sessionCwd(runnerId: string): string {
+  const found = findRunner(runnerId);
+  return found ? cwdFor(found.project, found.runner) : "";
+}
+
+/* What the Board shows for sessions this window hasn't opened yet. */
+const STATS_KEY = "cosmos.chat.stats";
+export interface SessionStats {
+  contextTokens: number;
+  contextWindow: number;
+  costUsd: number;
+  turns: number;
+  model: string;
+}
+
+function readStats(): Record<string, SessionStats> {
+  try {
+    return JSON.parse(localStorage.getItem(STATS_KEY) || "{}") ?? {};
+  } catch {
+    return {};
+  }
+}
+
+const savedStats = readStats();
+
+function saveStats(runnerId: string, s: ChatState): void {
+  savedStats[runnerId] = {
+    contextTokens: s.contextTokens,
+    contextWindow: s.contextWindow,
+    costUsd: s.costUsd,
+    turns: s.turns,
+    model: s.model,
+  };
+  try {
+    localStorage.setItem(STATS_KEY, JSON.stringify(savedStats));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function statsOf(runnerId: string): SessionStats | null {
+  const live = chats[runnerId];
+  if (live && (live.contextTokens > 0 || live.turns > 0)) return live;
+  return savedStats[runnerId] ?? null;
+}
 let localId = 0;
 const nextId = (p: string) => `${p}-${Date.now().toString(36)}-${localId++}`;
 
@@ -329,6 +386,8 @@ function finishTurn(runnerId: string, msg: Extract<Inbound, { type: "result" }>)
     lastActive: Math.floor(Date.now() / 1000),
     ...(focusedRunner()?.id === runnerId && document.hasFocus() ? {} : { unread: true }),
   });
+  runnersTouch(runnerId).catch(() => {});
+  saveStats(runnerId, chats[runnerId]);
   void syncTitle(runnerId);
   flushQueue(runnerId);
 }
@@ -453,6 +512,7 @@ export async function attachChatListeners(liveIds: string[]): Promise<void> {
   );
   await listen<{ runnerId: string; code: number | null; stderr: string }>("agent-exit", (e) => {
     const { runnerId, code, stderr } = e.payload;
+    const expected = expectedExit.delete(runnerId);
     const wasBusy = chats[runnerId]?.busy;
     mutate(runnerId, (s) => {
       s.busy = false;
@@ -462,7 +522,7 @@ export async function attachChatListeners(liveIds: string[]): Promise<void> {
         if ((it.kind === "text" || it.kind === "thinking") && it.streaming) it.streaming = false;
         if (it.kind === "tool" && it.state === "running") it.state = "error";
       }
-      if (wasBusy || (code !== null && code !== 0)) {
+      if (!expected && (wasBusy || (code !== null && code !== 0))) {
         s.items.push({
           kind: "notice",
           id: nextId("exit"),
@@ -484,6 +544,15 @@ export async function attachChatListeners(liveIds: string[]): Promise<void> {
     const id = e.payload.runnerId;
     if (findRunner(id)?.runner.mode === "tty") setTimeout(() => void syncTitle(id), 1500);
   });
+  // `cosmos runner add --task` and `cosmos runner send`: the app owns the
+  // protocol, so the CLI hands the text over instead of writing to stdin.
+  await listen<{ runnerId: string; text: string }>("agent-task", async (e) => {
+    const { runnerId, text } = e.payload;
+    if (!findRunner(runnerId)) await loadProjects().catch(console.error);
+    if (!findRunner(runnerId)) return;
+    await openChat(runnerId);
+    send(runnerId, text);
+  });
   for (const id of liveIds) {
     const found = findRunner(id);
     if (found?.runner.kind !== "agent" || found.runner.mode !== "chat") continue;
@@ -498,8 +567,7 @@ export async function openChat(runnerId: string): Promise<void> {
   if (!state.historyLoaded) {
     setChats(runnerId, "historyLoaded", true);
     try {
-      const cwd = findRunner(runnerId)?.project.cwd ?? "";
-      loadHistory(runnerId, await agentHistory(runnerId, cwd));
+      loadHistory(runnerId, await agentHistory(runnerId, sessionCwd(runnerId)));
       void syncTitle(runnerId);
     } catch (e) {
       console.error("[chat] history failed", e);
@@ -570,7 +638,7 @@ async function ensureProcess(runnerId: string): Promise<void> {
   if (found?.runner.live) return;
   if (!found) throw new Error("sessão não encontrada");
   const s = chatOf(runnerId);
-  await agentStart(runnerId, found.project.cwd, s.modelChoice || null, s.permissionMode);
+  await agentStart(runnerId, sessionCwd(runnerId), s.modelChoice || null, s.permissionMode);
   markRunnerLive(runnerId, true);
   const init = initialize();
   awaiting.set(init.requestId, { runnerId, what: "init" });
@@ -654,10 +722,10 @@ export async function syncTitle(runnerId: string): Promise<void> {
   try {
     const wanted = pendingTitle.get(runnerId);
     if (wanted && !found.runner.live) {
-      if (await sessionTitleSet(runnerId, found.project.cwd, wanted)) pendingTitle.delete(runnerId);
+      if (await sessionTitleSet(runnerId, sessionCwd(runnerId), wanted)) pendingTitle.delete(runnerId);
       return;
     }
-    const title = await sessionTitleGet(runnerId, found.project.cwd);
+    const title = await sessionTitleGet(runnerId, sessionCwd(runnerId));
     const cur = findRunner(runnerId)?.runner;
     if (!cur) return;
     if (wanted) {
@@ -678,12 +746,12 @@ export async function renameSession(runnerId: string, name: string): Promise<voi
   const found = findRunner(runnerId);
   if (!title || !found) return;
   await renameRunner(runnerId, title, false);
-  const { runner, project } = found;
+  const { runner } = found;
   if (runner.kind !== "agent" || !runner.sessionId) return;
   pendingTitle.set(runnerId, title);
   try {
     if (!runner.live) {
-      if (await sessionTitleSet(runnerId, project.cwd, title)) pendingTitle.delete(runnerId);
+      if (await sessionTitleSet(runnerId, sessionCwd(runnerId), title)) pendingTitle.delete(runnerId);
     } else if (runner.mode === "chat") {
       await agentSend(runnerId, renameSessionLine(title).line);
       pendingTitle.delete(runnerId);

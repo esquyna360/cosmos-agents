@@ -12,6 +12,7 @@ pub mod remote;
 mod status_fsm;
 mod store;
 mod tunnel;
+mod worktree;
 mod web;
 
 use std::sync::Arc;
@@ -82,7 +83,8 @@ fn pty_spawn(
     {
         Some(rec) => {
             let home = home_dir(&app).unwrap_or_default();
-            projects::spawn_args_for(&home, &rec, &cwd)
+            let args = projects::spawn_args_for(&home, &rec, &cwd);
+            projects::with_project_memory(args, &home, &project_slug, &rec)
         }
         None => args,
     };
@@ -511,6 +513,7 @@ fn runners_list(store: State<'_, Store>) -> Result<Vec<RunnerRecord>, String> {
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 fn runners_create(
+    app: AppHandle,
     store: State<'_, Store>,
     project_id: String,
     kind: String,
@@ -520,10 +523,13 @@ fn runners_create(
     env: Option<std::collections::HashMap<String, String>>,
     mode: Option<String>,
     name_auto: Option<bool>,
+    cwd: Option<String>,
+    task: Option<String>,
+    worktree: Option<bool>,
 ) -> Result<RunnerRecord, String> {
     let mut rec = projects::build_runner_record(
         uuid_v4(),
-        project_id,
+        project_id.clone(),
         kind,
         name,
         program,
@@ -535,9 +541,45 @@ fn runners_create(
         rec.mode = "chat".into();
     }
     rec.name_auto = name_auto.unwrap_or(false);
+    rec.task = task.unwrap_or_default().trim().to_string();
+    rec.cwd = cwd.unwrap_or_default();
+    if worktree.unwrap_or(false) {
+        let project = store
+            .projects_get(&project_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "projeto não encontrado".to_string())
+            .and_then(|row| projects::row_to_record(row).map_err(|e| e.to_string()))?;
+        let (path, branch) = worktree::create(&home_dir(&app)?, &project, &rec.name)
+            .map_err(|e| format!("Não consegui criar o worktree: {e}"))?;
+        rec.cwd = path;
+        rec.branch = branch;
+    }
     let row = projects::runner_record_to_row(&rec).map_err(|e| e.to_string())?;
     store.runners_upsert(&row).map_err(|e| e.to_string())?;
     Ok(rec)
+}
+
+/// Marks a runner as just used, so "stopped for N days" means something.
+#[tauri::command]
+fn runners_touch(store: State<'_, Store>, id: String) -> Result<(), String> {
+    let mut found = runner_record(&store, &id)?;
+    found.last_active = now_unix();
+    let row = projects::runner_record_to_row(&found).map_err(|e| e.to_string())?;
+    store.runners_upsert(&row).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn runners_set_task(store: State<'_, Store>, id: String, task: String) -> Result<(), String> {
+    let mut found = runner_record(&store, &id)?;
+    found.task = task.trim().to_string();
+    let row = projects::runner_record_to_row(&found).map_err(|e| e.to_string())?;
+    store.runners_upsert(&row).map_err(|e| e.to_string())
+}
+
+/// Branch and worktree count for each path, read off the disk.
+#[tauri::command]
+fn git_info(paths: Vec<String>) -> Vec<worktree::GitInfo> {
+    paths.iter().map(|p| worktree::info(p)).collect()
 }
 
 #[tauri::command]
@@ -601,13 +643,14 @@ fn agent_start(
         model: model.as_deref(),
         permission_mode: &permission_mode,
     };
-    let args = projects::chat_args_for(&home, &rec, &cwd, &opts);
     let project_slug = store
         .projects_get(&rec.project_id)
         .ok()
         .flatten()
         .map(|r| r.slug)
         .unwrap_or_default();
+    let args = projects::chat_args_for(&home, &rec, &cwd, &opts);
+    let args = projects::with_project_memory(args, &home, &project_slug, &rec);
     let spec = SpawnSpec {
         id,
         project_id: rec.project_id.clone(),
@@ -701,6 +744,7 @@ fn session_title_set(
 
 #[tauri::command]
 fn runners_delete(
+    app: AppHandle,
     sup: State<'_, PtySupervisor>,
     agents: State<'_, Arc<AgentSupervisor>>,
     store: State<'_, Store>,
@@ -708,7 +752,26 @@ fn runners_delete(
 ) -> Result<(), String> {
     agents.kill(&id);
     let _ = sup.kill(&id);
+    if let (Ok(rec), Ok(home)) = (runner_record(&store, &id), home_dir(&app)) {
+        remove_runner_worktree(&store, &home, &rec);
+    }
     store.runners_delete(&id).map_err(|e| e.to_string())
+}
+
+/// Best effort: git keeps a worktree that still holds uncommitted work.
+pub(crate) fn remove_runner_worktree(store: &Store, home: &std::path::Path, rec: &RunnerRecord) {
+    if rec.branch.is_empty() || !worktree::is_managed(home, &rec.cwd) {
+        return;
+    }
+    let repo = store
+        .projects_get(&rec.project_id)
+        .ok()
+        .flatten()
+        .and_then(|row| projects::row_to_record(row).ok())
+        .and_then(|p| p.folders.first().cloned());
+    if let Some(repo) = repo {
+        let _ = worktree::remove(&repo, &rec.cwd);
+    }
 }
 
 /* ----------------------------- memory ----------------------------- */
@@ -920,6 +983,9 @@ pub fn run() {
             runners_delete,
             runners_stop,
             runners_set_mode,
+            runners_touch,
+            runners_set_task,
+            git_info,
             runners_reset_session,
             agent_start,
             agent_send,

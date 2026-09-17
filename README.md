@@ -12,10 +12,18 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
 - **Projects** with 1..6 working folders. Each project lives at
   `~/.cosmos/projects/<slug>/`. Sticky slug = filesystem handle that doesn't
   move on rename. Names are unique (case-insensitive).
-- **Sessions** — the unit of work is a session, listed under its project in
-  the sidebar with a status glyph, what it is doing right now and when it
-  last moved. Anything waiting on you, in any project, is pulled up into
-  "Precisa de você". `⌘K` jumps to any session.
+- **Crew, Hub, Board** — a top strip replaces the sidebar. *Crew* is home:
+  one section per project, agents as cards, terminals as dark mono slabs,
+  anything stopped for 3+ days folded away. *Hub* is the `geral` agent, the
+  one that drives the `cosmos` CLI for you. *Board* is every agent and
+  terminal as one compact table with filters, context, cost and last
+  activity. Opening a project pins it as a tab; `⌘K` jumps anywhere.
+- **New agent** (`⌘N`) — where, an optional task (sent as the first
+  message), a name, and *main* or its *own worktree*
+  (`~/.cosmos/worktrees/<slug>/<name>` on branch `cosmos/<name>`). The
+  dialog prints the equivalent `cosmos runner add …` command.
+- **CLI** — `cosmos runner add --task --worktree`, `runner send`,
+  `runner stop`, `runner rename`, `runner list`, `cosmos status`.
   - A Claude Code session opens as a **native chat**: Cosmos runs
     `claude -p` with stream-json on both pipes (`agent_proc.rs` is a dumb
     line pipe; the protocol lives in `src/lib/claudeProtocol.ts` and
@@ -71,7 +79,7 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
 - **Settings sheet** (`⌘,`) — theme picker, keymap reference, and the remote
   switches: web UI, Cloudflare tunnel (toggles live, no restart), Telegram
   notifications.
-- **Drag to reorder** projects and runners in the sidebar; double-click any
+- **Drag to reorder** runners; double-click any
   name to rename in place. Order is persisted in a `position` column.
 - **Deleting** — a trash icon on the project row: one click when nothing is
   running, a typed name when agents are live. The project's dir moves to
@@ -89,7 +97,7 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
 | | |
 |---|---|
 | `⌘T` | new project |
-| `⌘N` / `⌘⇧N` | new session / new terminal in the current project |
+| `⌘N` / `⌘⇧N` | new agent / new terminal in the current project |
 | `⌘K` | jump to any session |
 | `⌘J` | same session as chat ↔ terminal |
 | `⌘W` | stop the focused runner (keeps it — click to resume) |
@@ -98,10 +106,9 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
 | `⌘⌥1–5` | pane layout: single / side by side / stacked / quadrants / main + 2 |
 | `⌃1–4` | focus N-th pane |
 | `⌘\` | toggle split (single ↔ side by side) |
-| `⌘B` | show/hide the project sidebar |
-| `⌘E` | cycle view (runners → editor → diff → memory → browser) |
+| `⌘0` / `⌘B` / `⌘⇧H` | Crew / Board / Hub |
+| `⌘E` | project tools (overview → files → diff → memory → browser) |
 | `⌘P` / `⌘⇧F` | file palette / grep |
-| `⌘D` | workflow overview |
 | `⌘,` | settings |
 | `⌘⇧T` | light ↔ dark |
 | `⌘F` | find/replace inside the editor |

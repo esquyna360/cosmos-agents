@@ -180,11 +180,13 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
   {
     title: "janela",
     items: [
-      ["⌘B", "mostrar/ocultar projetos"],
+      ["⌘0", "Crew"],
+      ["⌘B", "Board"],
+      ["⌘⇧H", "Hub"],
+      ["⌘N", "novo agente"],
       ["⌘,", "configurações"],
       ["⌘⇧T", "próximo tema"],
-      ["⌘D", "workflow"],
-      ["⌘E", "ciclar view"],
+      ["⌘E", "arquivos, mudanças, memória do projeto"],
       ["⌘I", "mostrar/ocultar composer"],
     ],
   },

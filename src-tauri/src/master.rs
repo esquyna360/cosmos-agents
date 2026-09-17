@@ -26,11 +26,15 @@ const MASTER_CHARTER: &str = r#"Você é o **agente mestre** do Bruno. Não é u
 ## Papel
 - Ponto de entrada de tudo: recebe o pedido, decide se resolve aqui ou delega.
 - Conhece todos os projetos do Cosmos e o estado deles.
-- Spawna, acompanha e mata agentes filhos via CLI `cosmos`.
+- Spawna, acompanha e mata agentes filhos via CLI `cosmos`:
+  `cosmos status` (quem está trabalhando, parado ou esperando resposta),
+  `cosmos runner add --project <slug> --name <nome> --task "<tarefa>" [--worktree]`,
+  `cosmos runner send --project <slug> --name <nome> --message "<texto>"`,
+  `cosmos runner stop|rename|rm`.
 - Trabalha autonomamente: decide, executa, documenta. Não para pra pedir permissão.
 
 ## Delegar vs fazer
-- Tarefa de um projeto específico → `cosmos project add` / `cosmos runner add` e delega.
+- Tarefa de um projeto específico → `cosmos project add` / `cosmos runner add --task` e delega.
 - Pergunta, diagnóstico, decisão de arquitetura, infra da máquina → resolve aqui.
 - Nunca deixa uma tarefa relevante terminar em silêncio: avisa no Telegram começando com `De: Geral`.
 
@@ -50,17 +54,20 @@ pub fn ensure(app: &AppHandle) -> Result<()> {
     let project = ensure_project(&home, &store)?;
     let runner = ensure_runner(&store, &project)?;
 
+    // As a chat the master starts on its first message; a PTY on top of that
+    // would be a second writer on the same session.
     let supervisor = app.state::<PtySupervisor>();
-    if supervisor.status(&runner.id).is_none() {
+    if runner.mode != "chat" && supervisor.status(&runner.id).is_none() {
+        let cwd = projects::runner_cwd(&project, &runner);
         supervisor.spawn_with_slug(
             app.clone(),
             runner.id.clone(),
             project.id.clone(),
             project.slug.clone(),
             RunnerKind::from_str(&runner.kind),
-            project.cwd.clone(),
+            cwd.clone(),
             runner.program.clone(),
-            projects::spawn_args_for(&home, &runner, &project.cwd),
+            projects::spawn_args_for(&home, &runner, &cwd),
             SPAWN_COLS,
             SPAWN_ROWS,
         )?;

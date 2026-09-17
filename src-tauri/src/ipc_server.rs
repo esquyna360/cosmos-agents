@@ -13,6 +13,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::thread;
 
 use anyhow::{anyhow, Context, Result};
@@ -24,8 +25,9 @@ use interprocess::local_socket::GenericNamespaced;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::agent_proc::AgentSupervisor;
 use crate::ipc::{Request, Response};
-use crate::projects::{self, ProjectRecord};
+use crate::projects::{self, ProjectRecord, RunnerRecord};
 use crate::pty_supervisor::{PtySupervisor, RunnerKind};
 use crate::store::Store;
 
@@ -144,46 +146,61 @@ fn handle_connection(app: AppHandle, stream: Stream) -> Result<()> {
 }
 
 fn dispatch(app: &AppHandle, req: Request) -> Response {
-    match req {
+    let result = match req {
         Request::ProjectAdd {
             name,
             folders,
             memory,
             with_agent,
-        } => match handle_project_add(app, name, folders, memory, with_agent) {
-            Ok(v) => Response::ok(v),
-            Err(e) => Response::err(e.to_string()),
-        },
-        Request::ProjectList => match handle_project_list(app) {
-            Ok(v) => Response::ok(v),
-            Err(e) => Response::err(e.to_string()),
-        },
+            task,
+        } => handle_project_add(app, name, folders, memory, with_agent, task),
+        Request::ProjectList => handle_project_list(app),
         Request::RunnerAdd {
             project,
             name,
             kind,
-        } => match handle_runner_add(app, project, name, kind.as_deref()) {
-            Ok(v) => Response::ok(v),
-            Err(e) => Response::err(e.to_string()),
-        },
-        Request::RunnerList { project } => match handle_runner_list(app, project.as_deref()) {
-            Ok(v) => Response::ok(v),
-            Err(e) => Response::err(e.to_string()),
-        },
-        Request::ProjectRemove { project } => match handle_project_remove(app, &project) {
-            Ok(v) => Response::ok(v),
-            Err(e) => Response::err(e.to_string()),
-        },
-        Request::ProjectPrune { dry_run } => match handle_project_prune(app, dry_run) {
-            Ok(v) => Response::ok(v),
-            Err(e) => Response::err(e.to_string()),
-        },
+            task,
+            worktree,
+            tty,
+        } => resolve_project(app, &project).and_then(|p| {
+            let opts = AddOptions {
+                kind: kind.as_deref().unwrap_or("agent"),
+                task: task.as_deref().unwrap_or(""),
+                worktree,
+                tty,
+            };
+            Ok(serde_json::to_value(spawn_runner(app, &p, name, &opts)?)?)
+        }),
+        Request::RunnerList { project } => handle_runner_list(app, project.as_deref()),
+        Request::ProjectRemove { project } => handle_project_remove(app, &project),
+        Request::ProjectPrune { dry_run } => handle_project_prune(app, dry_run),
         Request::RunnerRemove { project, name, id } => {
-            match handle_runner_remove(app, project.as_deref(), name.as_deref(), id.as_deref()) {
-                Ok(v) => Response::ok(v),
-                Err(e) => Response::err(e.to_string()),
-            }
+            resolve_runner(app, project.as_deref(), name.as_deref(), id.as_deref())
+                .and_then(|r| handle_runner_remove(app, r))
         }
+        Request::RunnerSend {
+            project,
+            name,
+            id,
+            message,
+        } => resolve_runner(app, project.as_deref(), name.as_deref(), id.as_deref())
+            .and_then(|r| handle_runner_send(app, r, &message)),
+        Request::RunnerStop { project, name, id } => {
+            resolve_runner(app, project.as_deref(), name.as_deref(), id.as_deref())
+                .and_then(|r| handle_runner_stop(app, r))
+        }
+        Request::RunnerRename {
+            project,
+            name,
+            id,
+            to,
+        } => resolve_runner(app, project.as_deref(), name.as_deref(), id.as_deref())
+            .and_then(|r| handle_runner_rename(app, r, &to)),
+        Request::Status => handle_status(app),
+    };
+    match result {
+        Ok(v) => Response::ok(v),
+        Err(e) => Response::err(e.to_string()),
     }
 }
 
@@ -206,6 +223,7 @@ fn handle_project_add(
     folders: Vec<String>,
     memory: String,
     with_agent: Option<String>,
+    task: Option<String>,
 ) -> Result<serde_json::Value> {
     let home = home_of(app)?;
     let store = app.state::<Store>();
@@ -221,7 +239,13 @@ fn handle_project_add(
     let _ = app.emit("projects-changed", json!({ "reason": "ipc.project.add" }));
 
     let runner = if let Some(agent_name) = with_agent {
-        Some(spawn_runner(app, &project, "agent", agent_name)?)
+        let opts = AddOptions {
+            kind: "agent",
+            task: task.as_deref().unwrap_or(""),
+            worktree: false,
+            tty: false,
+        };
+        Some(spawn_runner(app, &project, agent_name, &opts)?)
     } else {
         None
     };
@@ -237,18 +261,6 @@ fn handle_project_list(app: &AppHandle) -> Result<serde_json::Value> {
     Ok(serde_json::to_value(list)?)
 }
 
-fn handle_runner_add(
-    app: &AppHandle,
-    project_handle: String,
-    name: String,
-    kind: Option<&str>,
-) -> Result<serde_json::Value> {
-    let project = resolve_project(app, &project_handle)?;
-    let kind = kind.unwrap_or("agent").to_string();
-    let runner = spawn_runner(app, &project, &kind, name)?;
-    Ok(serde_json::to_value(runner)?)
-}
-
 fn handle_runner_list(app: &AppHandle, project: Option<&str>) -> Result<serde_json::Value> {
     let store = app.state::<Store>();
     let all = projects::runners_list(&store)?;
@@ -259,7 +271,67 @@ fn handle_runner_list(app: &AppHandle, project: Option<&str>) -> Result<serde_js
             all.into_iter().filter(|r| r.project_id == proj.id).collect()
         }
     };
-    Ok(serde_json::to_value(filtered)?)
+    let out: Vec<serde_json::Value> = filtered
+        .iter()
+        .map(|r| {
+            let (live, status) = liveness(app, r);
+            let mut v = serde_json::to_value(r).unwrap_or_default();
+            v["live"] = json!(live);
+            v["status"] = json!(status);
+            v
+        })
+        .collect();
+    Ok(json!(out))
+}
+
+/// `(live, status)` for a runner, whichever supervisor owns its process.
+fn liveness(app: &AppHandle, rec: &RunnerRecord) -> (bool, String) {
+    let status = app
+        .state::<PtySupervisor>()
+        .status(&rec.id)
+        .or_else(|| app.state::<Arc<AgentSupervisor>>().status(&rec.id));
+    match status {
+        Some(s) => (
+            true,
+            serde_json::to_value(s)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_string))
+                .unwrap_or_else(|| "running".into()),
+        ),
+        // A chat without a process is between messages, not gone.
+        None if rec.kind == "agent" && rec.mode == "chat" => (false, "idle".into()),
+        None => (false, "exited".into()),
+    }
+}
+
+fn handle_status(app: &AppHandle) -> Result<serde_json::Value> {
+    let store = app.state::<Store>();
+    let runners = projects::runners_list(&store)?;
+    let out: Vec<serde_json::Value> = projects::list(&store)?
+        .iter()
+        .map(|p| {
+            let rs: Vec<serde_json::Value> = runners
+                .iter()
+                .filter(|r| r.project_id == p.id)
+                .map(|r| {
+                    let (live, status) = liveness(app, r);
+                    json!({
+                        "name": r.name,
+                        "id": r.id,
+                        "kind": r.kind,
+                        "mode": r.mode,
+                        "status": status,
+                        "live": live,
+                        "branch": r.branch,
+                        "task": r.task,
+                        "lastActive": r.last_active,
+                    })
+                })
+                .collect();
+            json!({ "project": p.name, "slug": p.slug, "runners": rs })
+        })
+        .collect();
+    Ok(json!(out))
 }
 
 fn handle_project_remove(app: &AppHandle, handle: &str) -> Result<serde_json::Value> {
@@ -270,6 +342,7 @@ fn handle_project_remove(app: &AppHandle, handle: &str) -> Result<serde_json::Va
     // Kill first: a PTY outliving its rows would keep writing to a runner
     // nothing can address any more.
     supervisor.kill_project(&project.id)?;
+    app.state::<Arc<AgentSupervisor>>().kill_project(&project.id);
     let removed = projects::delete_project(&home, &store, &project.id)?;
     let _ = app.emit("projects-changed", json!({ "reason": "ipc.project.rm" }));
     Ok(json!({ "removed": removed }))
@@ -295,19 +368,21 @@ fn handle_project_prune(app: &AppHandle, dry_run: bool) -> Result<serde_json::Va
     }))
 }
 
-fn handle_runner_remove(
+/// One way to address a runner for every command: by `id`, or by `name`
+/// inside `project`. Ambiguous names are refused rather than guessed.
+fn resolve_runner(
     app: &AppHandle,
     project: Option<&str>,
     name: Option<&str>,
     id: Option<&str>,
-) -> Result<serde_json::Value> {
+) -> Result<RunnerRecord> {
     let store = app.state::<Store>();
     let all = projects::runners_list(&store)?;
-    let target = match (id, name) {
+    match (id, name) {
         (Some(id), _) => all
             .into_iter()
             .find(|r| r.id == id)
-            .ok_or_else(|| anyhow!("no runner with id `{id}`"))?,
+            .ok_or_else(|| anyhow!("no runner with id `{id}`")),
         (None, Some(name)) => {
             let handle = project.ok_or_else(|| anyhow!("--name needs --project"))?;
             let proj = resolve_project(app, handle)?;
@@ -317,7 +392,7 @@ fn handle_runner_remove(
                 .collect();
             match hits.len() {
                 0 => anyhow::bail!("no runner named `{name}` in `{}`", proj.slug),
-                1 => hits.remove(0),
+                1 => Ok(hits.remove(0)),
                 n => anyhow::bail!(
                     "{n} runners named `{name}` in `{}` — address one by --id",
                     proj.slug
@@ -325,15 +400,80 @@ fn handle_runner_remove(
             }
         }
         (None, None) => anyhow::bail!("pass --id or --name"),
-    };
-    let supervisor = app.state::<PtySupervisor>();
-    let _ = supervisor.kill(&target.id);
-    store.runners_delete(&target.id)?;
+    }
+}
+
+fn kill_processes(app: &AppHandle, id: &str) {
+    app.state::<Arc<AgentSupervisor>>().kill(id);
+    let _ = app.state::<PtySupervisor>().kill(id);
+}
+
+fn emit_runners_changed(app: &AppHandle, reason: &str, project_id: &str) {
     let _ = app.emit(
         "runners-changed",
-        json!({ "reason": "ipc.runner.rm", "projectId": target.project_id }),
+        json!({ "reason": reason, "projectId": project_id }),
     );
+}
+
+fn handle_runner_remove(app: &AppHandle, target: RunnerRecord) -> Result<serde_json::Value> {
+    let store = app.state::<Store>();
+    kill_processes(app, &target.id);
+    crate::remove_runner_worktree(&store, &home_of(app)?, &target);
+    store.runners_delete(&target.id)?;
+    emit_runners_changed(app, "ipc.runner.rm", &target.project_id);
     Ok(json!({ "removed": target }))
+}
+
+fn handle_runner_stop(app: &AppHandle, target: RunnerRecord) -> Result<serde_json::Value> {
+    let (was_live, _) = liveness(app, &target);
+    kill_processes(app, &target.id);
+    // The supervisors announce an exit from their reader threads, but only
+    // once the pipe drains; say it now so the UI never shows a ghost.
+    let _ = app.emit(
+        "runner-status",
+        json!({ "projectId": target.project_id, "runnerId": target.id, "status": "exited" }),
+    );
+    emit_runners_changed(app, "ipc.runner.stop", &target.project_id);
+    Ok(json!({ "stopped": target.id, "wasLive": was_live }))
+}
+
+fn handle_runner_rename(app: &AppHandle, mut target: RunnerRecord, to: &str) -> Result<serde_json::Value> {
+    let to = to.trim();
+    if to.is_empty() {
+        anyhow::bail!("--to needs a name");
+    }
+    target.name = to.to_string();
+    target.name_auto = false;
+    let store = app.state::<Store>();
+    store.runners_upsert(&projects::runner_record_to_row(&target)?)?;
+    emit_runners_changed(app, "ipc.runner.rename", &target.project_id);
+    Ok(serde_json::to_value(target)?)
+}
+
+fn handle_runner_send(app: &AppHandle, target: RunnerRecord, message: &str) -> Result<serde_json::Value> {
+    let message = message.trim();
+    if message.is_empty() {
+        anyhow::bail!("--message is empty");
+    }
+    if target.kind != "agent" {
+        anyhow::bail!("`{}` is a shell, not an agent", target.name);
+    }
+    if target.mode == "chat" {
+        // The stream-json protocol lives in the webview, which also starts
+        // the process when there is none.
+        app.emit("agent-task", json!({ "runnerId": target.id, "text": message }))?;
+        return Ok(json!({ "sent": target.id, "via": "chat" }));
+    }
+    let pty = app.state::<PtySupervisor>();
+    if pty.status(&target.id).is_none() {
+        anyhow::bail!(
+            "`{}` is a stopped terminal agent — open it in Cosmos first, or create agents without --tty",
+            target.name
+        );
+    }
+    pty.write(&target.id, message.replace('\n', " ").as_bytes())?;
+    pty.write(&target.id, b"\r")?;
+    Ok(json!({ "sent": target.id, "via": "tty" }))
 }
 
 /// Resolves a project handle to a record. `"."` means "use whatever
@@ -367,43 +507,73 @@ fn home_dir() -> PathBuf {
     std::env::var_os(var).map(PathBuf::from).unwrap_or_default()
 }
 
+struct AddOptions<'a> {
+    kind: &'a str,
+    task: &'a str,
+    worktree: bool,
+    tty: bool,
+}
+
+/// Persists a runner and brings it up. Claude agents are chats by default:
+/// no process until the first message, which `agent-task` asks the webview to
+/// send. Shells and `--tty` agents get their PTY right away.
 fn spawn_runner(
     app: &AppHandle,
     project: &ProjectRecord,
-    kind: &str,
     name: String,
-) -> Result<crate::projects::RunnerRecord> {
+    opts: &AddOptions,
+) -> Result<RunnerRecord> {
     let store = app.state::<Store>();
-    let supervisor = app.state::<PtySupervisor>();
-    let rec = projects::build_runner_record(
+    let home = home_dir();
+    let mut rec = projects::build_runner_record(
         crate::uuid_v4_for_ipc(),
         project.id.clone(),
-        kind.to_string(),
+        opts.kind.to_string(),
         name,
         None,
         None,
         None,
         now_unix(),
     );
-    let row = projects::runner_record_to_row(&rec)?;
-    store.runners_upsert(&row)?;
+    let is_agent = rec.kind == "agent";
+    let as_chat = is_agent && !opts.tty && projects::is_claude_command(&rec.args);
+    if as_chat {
+        rec.mode = "chat".into();
+    }
+    if is_agent {
+        rec.task = opts.task.trim().to_string();
+    }
+    if opts.worktree {
+        if !is_agent {
+            anyhow::bail!("--worktree only applies to agents");
+        }
+        let (path, branch) = crate::worktree::create(&home, project, &rec.name)?;
+        rec.cwd = path;
+        rec.branch = branch;
+    }
+    store.runners_upsert(&projects::runner_record_to_row(&rec)?)?;
 
-    let runner_kind = RunnerKind::from_str(&rec.kind);
-    supervisor.spawn_with_slug(
-        app.clone(),
-        rec.id.clone(),
-        project.id.clone(),
-        project.slug.clone(),
-        runner_kind,
-        project.cwd.clone(),
-        rec.program.clone(),
-        projects::spawn_args_for(&home_dir(), &rec, &project.cwd),
-        SPAWN_COLS,
-        SPAWN_ROWS,
-    )?;
-    let _ = app.emit(
-        "runners-changed",
-        json!({ "reason": "ipc.runner.add", "projectId": project.id }),
-    );
+    if !as_chat {
+        let cwd = projects::runner_cwd(project, &rec);
+        let args = projects::spawn_args_for(&home, &rec, &cwd);
+        let args = projects::with_project_memory(args, &home, &project.slug, &rec);
+        let args = projects::with_initial_prompt(args, &rec, &rec.task);
+        app.state::<PtySupervisor>().spawn_with_slug(
+            app.clone(),
+            rec.id.clone(),
+            project.id.clone(),
+            project.slug.clone(),
+            RunnerKind::from_str(&rec.kind),
+            cwd,
+            rec.program.clone(),
+            args,
+            SPAWN_COLS,
+            SPAWN_ROWS,
+        )?;
+    }
+    emit_runners_changed(app, "ipc.runner.add", &project.id);
+    if as_chat && !rec.task.is_empty() {
+        let _ = app.emit("agent-task", json!({ "runnerId": rec.id, "text": rec.task }));
+    }
     Ok(rec)
 }

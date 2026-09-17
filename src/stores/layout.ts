@@ -130,10 +130,10 @@ export function setTermFontSize(px: number): void {
 }
 
 /** Right-hand panel: what changed, how much context is left. */
-export type InspectorTab = "changes" | "context";
+export type InspectorTab = "files" | "changes" | "context";
 const INSPECTOR_KEY = "cosmos.inspector";
 const [inspector, setInspectorRaw] = createSignal<InspectorTab | null>(
-  ((v) => (v === "changes" || v === "context" ? v : null))(localStorage.getItem(INSPECTOR_KEY)),
+  ((v) => (v === "files" || v === "changes" || v === "context" ? v : null))(localStorage.getItem(INSPECTOR_KEY)),
 );
 export { inspector };
 export function setInspector(v: InspectorTab | null): void {

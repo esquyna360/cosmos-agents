@@ -11,6 +11,8 @@ import { createSignal } from "solid-js";
  */
 
 export type ThemeId =
+  | "walnut"
+  | "cream"
   | "night"
   | "day"
   | "midnight"
@@ -31,9 +33,23 @@ export interface ThemeSpec {
 
 export const THEMES: ThemeSpec[] = [
   {
+    id: "walnut",
+    label: "Nogueira",
+    hint: "escuro quente, o padrão",
+    mode: "dark",
+    swatch: ["#201e1d", "#e6935e"],
+  },
+  {
+    id: "cream",
+    label: "Creme",
+    hint: "claro quente",
+    mode: "light",
+    swatch: ["#f5ead8", "#bf6730"],
+  },
+  {
     id: "night",
     label: "Noite",
-    hint: "escuro neutro, o padrão",
+    hint: "escuro neutro",
     mode: "dark",
     swatch: ["#111214", "#909cff"],
   },
@@ -47,7 +63,7 @@ export const THEMES: ThemeSpec[] = [
   {
     id: "midnight",
     label: "Midnight",
-    hint: "azul profundo, o padrão",
+    hint: "azul profundo",
     mode: "dark",
     swatch: ["#0a0b10", "#7aa2ff"],
   },
@@ -90,7 +106,7 @@ export const THEMES: ThemeSpec[] = [
 
 export type ThemePref = ThemeId | "system";
 
-const KEY = "cosmos.theme.v2";
+const KEY = "cosmos.theme.v3";
 
 function read(): ThemePref {
   const v = localStorage.getItem(KEY);
@@ -102,7 +118,7 @@ const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
 
 function resolve(pref: ThemePref): ThemeId {
   if (pref !== "system") return pref;
-  return systemDark.matches ? "night" : "day";
+  return systemDark.matches ? "walnut" : "cream";
 }
 
 const [themePref, setThemePrefRaw] = createSignal<ThemePref>(read());
@@ -135,7 +151,7 @@ export function applyTheme(pref: ThemePref): void {
 
 /** ⌘⇧T flips between light and dark, whatever palette is active. */
 export function cycleTheme(): void {
-  applyTheme(themeSpec().mode === "dark" ? "day" : "night");
+  applyTheme(themeSpec().mode === "dark" ? "cream" : "walnut");
 }
 
 /** Call once at boot, before first paint, so there is no flash of the default. */

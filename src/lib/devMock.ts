@@ -13,6 +13,15 @@ const now = Math.floor(Date.now() / 1000);
 
 const PROJECTS = [
   {
+    id: "p-geral",
+    name: "geral",
+    slug: "geral",
+    folders: ["/Users/bruno/code"],
+    memory: "",
+    cwd: "/Users/bruno/.cosmos/projects/geral",
+    created_at: now - 86_400 * 120,
+  },
+  {
     id: "p-metamorfosis",
     name: "Metamorfosis",
     slug: "metamorfosis",
@@ -50,6 +59,9 @@ const RUNNERS = (
     ["r5", "p-cosmos", "shell", "vite", "zsh"],
     ["r6", "p-iquit", "agent", "Textos do onboarding", "claude"],
     ["r7", "p-iquit", "agent", "Nova sessão", "claude"],
+    ["r8", "p-iquit", "agent", "Migrar analytics", "claude"],
+    ["r9", "p-iquit", "shell", "flutter run", "zsh"],
+    ["r0", "p-geral", "agent", "geral", "claude"],
   ] as const
 ).map(([id, projectId, kind, name, program], i) => ({
   id,
@@ -61,7 +73,16 @@ const RUNNERS = (
   env: {},
   with_status_fsm: kind === "agent",
   created_at: now - 3600 * (i + 1),
-  last_active: now - 60 * i * i * 7,
+  last_active: id === "r8" || id === "r9" ? now - 86_400 * 9 : now - 60 * i * i * 7,
+  cwd: id === "r3" ? "/Users/bruno/.cosmos/worktrees/cosmos/fila-de-mensagens" : "",
+  branch: id === "r3" ? "cosmos/fila-de-mensagens" : "",
+  task:
+    {
+      r1: "O build iOS quebra no pod install depois do upgrade do Firebase.",
+      r3: "As mensagens que mando enquanto o agente trabalha somem. Descobre por que e arruma.",
+      r4: "Publicar a 0.4 e conferir que o updater enxerga a versão nova.",
+      r6: "Reescreve os três textos do onboarding em um tom mais direto.",
+    }[id as string] ?? "",
   session_id: kind === "agent" ? `sess-${id}` : "",
   mode: kind === "agent" && id !== "r1" ? "chat" : "tty",
   name_auto: id === "r7",
@@ -240,6 +261,13 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
     return null;
   },
   session_title_get: () => ({ custom: null, ai: null }),
+  git_info: (args) =>
+    (args.paths as string[]).map((path) => ({
+      path,
+      isRepo: !path.endsWith("/code"),
+      branch: path.includes("worktrees") ? "cosmos/fila-de-mensagens" : path.endsWith("/code") ? null : "main",
+      worktrees: path.endsWith("cosmos-agents") ? 1 : 0,
+    })),
   projects_list: () => PROJECTS,
   runners_list: () => RUNNERS,
   pty_live_ids: () => Object.keys(STATUSES),

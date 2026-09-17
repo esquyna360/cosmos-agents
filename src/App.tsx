@@ -11,21 +11,23 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
-import { ArrowLeft, Layers, MessageSquare, SquareTerminal } from "lucide-solid";
+import { MessageSquare, SquareTerminal } from "lucide-solid";
 
-import Sidebar from "./components/Sidebar";
+import TopStrip from "./components/TopStrip";
+import CrewView from "./components/CrewView";
+import HubView from "./components/HubView";
+import BoardView from "./components/BoardView";
+import ProjectView from "./components/ProjectView";
+import NewAgentModal from "./components/NewAgentModal";
+import AddProjectModal from "./components/AddProjectModal";
+import { DeleteProjectDialog } from "./components/menus";
 import PaneGrid from "./components/PaneGrid";
 import SessionView from "./components/SessionView";
 import Inspector from "./components/Inspector";
 import JumpPalette from "./components/JumpPalette";
-import Editor from "./components/Editor";
 import CommandPalette, { type PaletteMode } from "./components/CommandPalette";
-import DiffView from "./components/DiffView";
-import WorkflowView from "./components/WorkflowView";
 import AgentCreatorModal from "./components/AgentCreatorModal";
 import UpdateBanner from "./components/UpdateBanner";
-import MemoryView from "./components/MemoryView";
-import Browser from "./components/Browser";
 import SettingsPanel from "./components/SettingsPanel";
 import { MenuHost } from "./ui/Menu";
 import { creator, openCreator, closeCreator } from "./stores/creator";
@@ -38,7 +40,6 @@ import {
   focusedRunner,
   loadProjects,
   migrateLegacyLocalStorage,
-  newSession,
   newTerminal,
   projectsStore,
   setRunnerMode,
@@ -48,19 +49,12 @@ import {
 } from "./stores/projects";
 import { attachChatListeners } from "./stores/chat";
 import { jumpOpen, openJump } from "./stores/jump";
+import { go, projectTab, route, routeProjectId, setProjectTab, type ProjectTab } from "./stores/nav";
+import { startGitWatch } from "./stores/git";
 import {
-  cycleView,
   inspector,
   settingsOpen,
-  setView,
-  setWorkflowOpen,
-  sidebarOpen,
   toggleSettings,
-  toggleSidebar,
-  toggleWorkflow,
-  view,
-  workflowOpen,
-  type ViewMode,
 } from "./stores/layout";
 import {
   LAYOUTS,
@@ -79,7 +73,11 @@ export default function App() {
 
   // Opening a file via palette/grep auto-switches to the editor.
   createEffect(() => {
-    if (editorOpenRequest()) setView("editor");
+    if (!editorOpenRequest()) return;
+    const id = routeProjectId();
+    if (!id) return;
+    go({ kind: "project", projectId: id });
+    setProjectTab("files");
   });
 
   onMount(() => {
@@ -92,6 +90,7 @@ export default function App() {
       .catch(console.error);
     attachRunnerStatusListener().catch(console.error);
     attachExternalChangesListener().catch(console.error);
+    startGitWatch();
     // Probe installed AI CLIs in the background — the result fills the
     // "agent" dropdown. Probe is cheap (~50ms) and cached.
     import("./stores/clis").then((m) => m.ensureClisDetected().catch(console.error));
@@ -135,11 +134,6 @@ export default function App() {
     });
 
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && workflowOpen()) {
-        e.preventDefault();
-        setWorkflowOpen(false);
-        return;
-      }
       // ⌃1–4 focuses a pane. Kept off ⌘ so ⌘1–9 stays on projects.
       if (e.ctrlKey && !e.metaKey && /^[1-4]$/.test(e.key)) {
         e.preventDefault();
@@ -164,12 +158,17 @@ export default function App() {
       }
       if (key === "b") {
         e.preventDefault();
-        toggleSidebar();
+        go({ kind: route().kind === "board" ? "crew" : "board" });
         return;
       }
-      if (key === "d") {
+      if (key === "h" && e.shiftKey) {
         e.preventDefault();
-        toggleWorkflow();
+        go({ kind: "hub" });
+        return;
+      }
+      if (e.key === "0") {
+        e.preventDefault();
+        go({ kind: "crew" });
         return;
       }
       if (key === "t" && e.shiftKey) {
@@ -184,10 +183,9 @@ export default function App() {
       }
       if (key === "n") {
         e.preventDefault();
-        const p = focusedProject();
-        if (!p) return;
-        setView("runners");
-        (e.shiftKey ? newTerminal(p.id) : newSession(p.id)).catch(console.error);
+        const id = routeProjectId();
+        if (!e.shiftKey) openCreator({ mode: "agent", projectId: id ?? undefined });
+        else if (id) newTerminal(id).catch(console.error);
         return;
       }
       if (key === "j") {
@@ -210,7 +208,15 @@ export default function App() {
       }
       if (key === "e") {
         e.preventDefault();
-        cycleView();
+        const id = routeProjectId();
+        if (!id) return;
+        if (route().kind !== "project") {
+          go({ kind: "project", projectId: id });
+          setProjectTab("files");
+          return;
+        }
+        const i = PROJECT_TABS.indexOf(projectTab());
+        setProjectTab(PROJECT_TABS[(i + 1) % PROJECT_TABS.length]);
         return;
       }
       if (key === "k" && !e.shiftKey) {
@@ -251,68 +257,67 @@ export default function App() {
   const roots = () => focusedProject()?.folders ?? [];
 
   return (
-    <div class="flex h-screen w-screen overflow-hidden bg-void text-ink">
-      <Show when={sidebarOpen()}>
-        <Sidebar />
-      </Show>
+    <div class="flex h-screen w-screen flex-col overflow-hidden bg-void text-ink">
+      <TopStrip />
 
       <main class="relative flex min-h-0 min-w-0 flex-1 flex-col bg-void">
-        <Show when={workflowOpen()}>
-          <WorkflowView />
-        </Show>
-
-        <Show when={!workflowOpen()}>
-          <Show when={focusedProject()} fallback={<NoProjects />} keyed>
+          <Show when={route().kind === "crew"}>
+            <CrewView />
+          </Show>
+          <Show when={route().kind === "hub"}>
+            <HubView />
+          </Show>
+          <Show when={route().kind === "board"}>
+            <BoardView />
+          </Show>
+          <Show when={route().kind === "project" && focusedProject()} keyed>
+            {(p) => <ProjectView project={p} />}
+          </Show>
+          <Show when={route().kind === "session" && focusedProject()} keyed>
             {(p) => (
-              <>
-                <Show when={view() === "runners"}>
-                  <div class="flex min-h-0 min-w-0 flex-1">
-                    <Show
-                      when={layout() === "single"}
-                      fallback={
-                        <div class="flex min-h-0 min-w-0 flex-1 flex-col pt-7" data-tauri-drag-region>
-                          <PaneGrid project={p} />
-                        </div>
-                      }
-                    >
-                      <Show when={focusedRunner()} fallback={<NoSessions project={p} />}>
-                        {(r) => <SessionView project={p} runner={r()} />}
-                      </Show>
-                    </Show>
-                    <Show when={inspector()}>
-                      <Inspector project={p} runner={focusedRunner()} />
-                    </Show>
-                  </div>
+              <div class="flex min-h-0 min-w-0 flex-1">
+                <Show
+                  when={layout() === "single"}
+                  fallback={
+                    <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+                      <PaneGrid project={p} />
+                    </div>
+                  }
+                >
+                  <Show when={focusedRunner()} fallback={<NoSession project={p} />}>
+                    {(r) => <SessionView project={p} runner={r()} />}
+                  </Show>
                 </Show>
-                <Show when={view() !== "runners"}>
-                  <ViewBar project={p} />
+                <Show when={inspector()}>
+                  <Inspector project={p} runner={focusedRunner()} />
                 </Show>
-                <Show when={view() === "editor"}>
-                  <Editor roots={roots()} />
-                </Show>
-                <Show when={view() === "diff"}>
-                  <DiffView roots={roots()} />
-                </Show>
-                <Show when={view() === "memory"}>
-                  <MemoryView project={p} />
-                </Show>
-                <Show when={view() === "browser"}>
-                  <Browser projectId={p.id} />
-                </Show>
-              </>
+              </div>
             )}
           </Show>
 
           <Show when={palette() && focusedProject()}>
             <CommandPalette mode={palette()!} roots={roots()} onClose={() => setPalette(null)} />
           </Show>
-        </Show>
-
-        <Show when={creator()}>
-          <AgentCreatorModal editingProjectId={creator()!.editingProjectId} onClose={closeCreator} />
-        </Show>
       </main>
 
+      <Show when={creator()} keyed>
+        {(c) => (
+          <Show
+            when={c.mode === "agent"}
+            fallback={
+              <Show
+                when={"editingProjectId" in c && c.editingProjectId}
+                fallback={<AddProjectModal onClose={closeCreator} />}
+              >
+                {(id) => <AgentCreatorModal editingProjectId={id()} onClose={closeCreator} />}
+              </Show>
+            }
+          >
+            <NewAgentModal projectId={"projectId" in c ? c.projectId : undefined} onClose={closeCreator} />
+          </Show>
+        )}
+      </Show>
+      <DeleteProjectDialog />
       <Show when={jumpOpen()}>
         <JumpPalette />
       </Show>
@@ -325,92 +330,22 @@ export default function App() {
   );
 }
 
-const VIEW_NAMES: Record<ViewMode, string> = {
-  runners: "Sessões",
-  editor: "Arquivos",
-  diff: "Mudanças",
-  memory: "Memória",
-  browser: "Navegador",
-};
+const PROJECT_TABS: ProjectTab[] = ["overview", "files", "diff", "memory", "browser"];
 
-/** Header for the project-level tools; the way back to the sessions. */
-function ViewBar(props: { project: ProjectUI }) {
-  const others: ViewMode[] = ["editor", "diff", "memory", "browser"];
+function NoSession(props: { project: ProjectUI }) {
   return (
-    <header
-      data-tauri-drag-region
-      class="flex h-[46px] shrink-0 items-center gap-1 border-b border-line pr-3"
-      classList={{ "pl-[84px]": !sidebarOpen(), "pl-2.5": sidebarOpen() }}
-    >
-      <button
-        class="mr-1 flex items-center gap-1.5 rounded-md px-2 py-1 text-[12.5px] text-dim transition hover:bg-fill-2 hover:text-ink"
-        onClick={() => setView("runners")}
-      >
-        <ArrowLeft size={13} />
-        Sessões
-      </button>
-      {others.map((id) => (
-        <button
-          class="rounded-md px-2.5 py-1 text-[12.5px] transition"
-          classList={{
-            "bg-fill-2 text-ink": view() === id,
-            "text-faint hover:text-ink": view() !== id,
-          }}
-          onClick={() => setView(id)}
-        >
-          {VIEW_NAMES[id]}
-        </button>
-      ))}
-      <span class="ml-auto truncate text-[12px] text-faint">{props.project.name}</span>
-    </header>
-  );
-}
-
-function NoSessions(props: { project: ProjectUI }) {
-  return (
-    <div data-tauri-drag-region class="flex flex-1 flex-col items-center justify-center gap-3">
-      <p class="text-[15px] font-medium text-ink">{props.project.name} ainda não tem sessões</p>
-      <p class="max-w-[360px] text-center text-[13px] leading-relaxed text-dim">
-        Uma sessão é uma conversa com o Claude sobre uma coisa só. Abra quantas precisar; cada uma
-        ganha um nome sozinha.
-      </p>
+    <div class="flex flex-1 flex-col items-center justify-center gap-3">
+      <p class="font-heading text-[20px] text-ink">Esse agente não existe mais</p>
       <div class="mt-1 flex gap-2">
-        <button
-          class="flex items-center gap-2 rounded-md bg-accent px-3 py-1.5 text-[12.5px] font-medium text-accent-ink transition hover:opacity-90"
-          onClick={() => void newSession(props.project.id)}
-        >
+        <button class="cx-btn-primary" onClick={() => openCreator({ mode: "agent", projectId: props.project.id })}>
           <MessageSquare size={13} />
-          Nova sessão
-          <span class="opacity-70">⌘N</span>
+          Novo agente
         </button>
-        <button
-          class="flex items-center gap-2 rounded-md border border-line-strong px-3 py-1.5 text-[12.5px] text-ink transition hover:bg-fill-2"
-          onClick={() => void newTerminal(props.project.id)}
-        >
+        <button class="cx-pill cx-pill-line" onClick={() => void newTerminal(props.project.id)}>
           <SquareTerminal size={13} />
           Novo terminal
         </button>
       </div>
-    </div>
-  );
-}
-
-function NoProjects() {
-  return (
-    <div data-tauri-drag-region class="flex flex-1 flex-col items-center justify-center gap-3">
-      <p class="text-[15px] font-medium text-ink">Nenhum projeto ainda</p>
-      <p class="max-w-[340px] text-center text-[13px] leading-relaxed text-dim">
-        Um projeto junta as pastas em que você trabalha. As sessões do Claude e os terminais ficam
-        dentro dele.
-      </p>
-      <button
-        class="mt-1 flex items-center gap-2 rounded-md bg-accent px-3 py-1.5 text-[12.5px] font-medium text-accent-ink transition hover:opacity-90"
-        onClick={() => openCreator({ mode: "project" })}
-      >
-        <Layers size={13} />
-        Criar projeto
-        <span class="opacity-70">⌘T</span>
-      </button>
     </div>
   );
 }

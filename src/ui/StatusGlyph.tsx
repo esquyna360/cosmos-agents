@@ -44,7 +44,7 @@ export default function StatusGlyph(props: { glyph: Glyph; size?: number }) {
     >
       <Switch>
         <Match when={props.glyph === "working"}>
-          <svg viewBox="0 0 14 14" class="cx-spin h-full w-full text-accent">
+          <svg viewBox="0 0 14 14" class="cx-spin h-full w-full text-live">
             <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-opacity="0.22" stroke-width="1.6" />
             <path d="M7 2.5a4.5 4.5 0 0 1 4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
           </svg>
@@ -74,3 +74,38 @@ export default function StatusGlyph(props: { glyph: Glyph; size?: number }) {
     </span>
   );
 }
+
+export type Tone = "busy" | "live" | "accent" | "alert" | "dim" | "faint";
+
+/** The two-word version the cards and the board print next to the glyph. */
+export function stateOf(r: RunnerUI): { label: string; tone: Tone } {
+  switch (glyphFor(r)) {
+    case "awaiting":
+      return { label: "Precisa de você", tone: "busy" };
+    case "working":
+      return { label: "Trabalhando", tone: "live" };
+    case "unread":
+      return { label: "Terminou", tone: "accent" };
+    case "error":
+      return { label: "Erro", tone: "alert" };
+    case "ready":
+      return { label: "Pronto", tone: "dim" };
+    case "shell-live":
+      return { label: "Aberto", tone: "dim" };
+    case "shell-stopped":
+      return { label: "Fechado", tone: "faint" };
+    default:
+      return { label: "Parado", tone: "faint" };
+  }
+}
+
+export const TONE_TEXT: Record<Tone, string> = {
+  busy: "text-busy",
+  live: "text-live",
+  accent: "text-accent",
+  alert: "text-alert",
+  dim: "text-dim",
+  faint: "text-faint",
+};
+
+export const needsYou = (r: RunnerUI) => r.status === "awaiting_input" || r.status === "error";

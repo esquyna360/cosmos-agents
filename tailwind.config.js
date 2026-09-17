@@ -23,6 +23,8 @@ export default {
         "busy-soft": "var(--busy-soft)",
         "alert-soft": "var(--alert-soft)",
         "add-soft": "var(--add-soft)",
+        "live-soft": "var(--live-soft)",
+        well: "var(--well)",
         // Overlay scale. Components say `bg-fill-2` and stay correct in both
         // light and dark themes, where the underlying rgba flips polarity.
         fill: {
