@@ -46,6 +46,25 @@ pub enum Request {
         #[serde(default)]
         project: Option<String>,
     },
+    /// Delete a project, its runners and its resumable sessions. The
+    /// materialized dir moves to `~/.cosmos/.trash/`; the working folders on
+    /// disk are never touched.
+    ProjectRemove { project: String },
+    /// Move the leftover dirs of already-deleted projects into the trash.
+    /// `dry_run` only reports what it would move.
+    ProjectPrune {
+        #[serde(default)]
+        dry_run: bool,
+    },
+    /// Delete one runner. Addressed by `id`, or by `name` within `project`.
+    RunnerRemove {
+        #[serde(default)]
+        project: Option<String>,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        id: Option<String>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

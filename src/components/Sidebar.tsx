@@ -16,12 +16,15 @@ import {
   Search,
   Settings2,
   TerminalSquare,
+  Trash2,
 } from "lucide-solid";
 
 import {
+  deleteProject,
   focusProject,
   focusedProjectId,
   focusRunner,
+  isMasterProject,
   moveProject,
   moveRunner,
   renameRunner,
@@ -201,6 +204,35 @@ function ProjectRow(props: {
   const isDropTarget = () =>
     drag()?.kind === "project" && dropBefore() === p().id;
 
+  /* The delete confirm lives in the row itself. It used to be four steps deep
+     inside the edit modal, which is the same as not existing. */
+  const [confirming, setConfirming] = createSignal(false);
+  const [typed, setTyped] = createSignal("");
+  const [deleteError, setDeleteError] = createSignal<string | null>(null);
+  const [deleting, setDeleting] = createSignal(false);
+  /// A project with nothing running is one click away. One with live agents
+  /// asks for its name first — that is the case where a misclick costs work.
+  const needsTyping = () => liveCount() > 0;
+  const armed = () => !needsTyping() || typed().trim() === p().name;
+
+  function openConfirm() {
+    setTyped("");
+    setDeleteError(null);
+    setConfirming(true);
+  }
+
+  async function runDelete() {
+    if (!armed() || deleting()) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteProject(p().id);
+    } catch (e) {
+      setDeleteError(String(e));
+      setDeleting(false);
+    }
+  }
+
   return (
     <li
       classList={{
@@ -322,6 +354,20 @@ function ProjectRow(props: {
         >
           <Settings2 size={11} />
         </button>
+        <Show when={!isMasterProject(p())}>
+          <button
+            class="hidden shrink-0 rounded p-1 text-faint transition hover:bg-alert/15 hover:text-alert group-hover:inline-flex"
+            classList={{ "!inline-flex text-alert": confirming() }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (confirming()) setConfirming(false);
+              else openConfirm();
+            }}
+            title="excluir projeto"
+          >
+            <Trash2 size={11} />
+          </button>
+        </Show>
         <Show when={liveCount() > 0}>
           <button
             class="hidden shrink-0 rounded p-1 text-faint transition hover:bg-fill-2 hover:text-ink group-hover:inline-flex"
@@ -335,6 +381,70 @@ function ProjectRow(props: {
           </button>
         </Show>
       </div>
+
+      <Show when={confirming()}>
+        <div
+          class="mb-1 ml-[19px] mt-1 rounded-cx border border-alert/30 bg-alert/[0.07] px-2 py-1.5"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              setConfirming(false);
+            }
+          }}
+        >
+          <p class="text-[10.5px] leading-snug text-dim">
+            excluir <b class="text-ink">{p().name}</b>?
+            <Show when={p().runners.length > 0}>
+              {" "}
+              vão junto {p().runners.length} runner
+              {p().runners.length === 1 ? "" : "s"} e suas sessões.
+            </Show>{" "}
+            as pastas de trabalho no disco ficam.
+          </p>
+          <Show when={needsTyping()}>
+            <p class="mt-1 text-[10px] leading-snug text-alert">
+              {liveCount()} rodando agora — digite o nome pra liberar
+            </p>
+            <input
+              class="mt-1 w-full rounded border border-line bg-sunken px-1.5 py-1 text-[11px] text-ink outline-none transition focus:border-alert/50"
+              placeholder={p().name}
+              value={typed()}
+              ref={(el) => queueMicrotask(() => el.focus())}
+              onInput={(e) => setTyped(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void runDelete();
+                }
+              }}
+            />
+          </Show>
+          <Show when={deleteError()}>
+            <p class="mt-1 text-[10px] leading-snug text-alert">{deleteError()}</p>
+          </Show>
+          <div class="mt-1.5 flex items-center gap-1.5">
+            <button
+              class="rounded border border-alert/40 px-2 py-0.5 text-[10.5px] font-medium text-alert transition hover:bg-alert/15 disabled:cursor-not-allowed disabled:opacity-35"
+              disabled={!armed() || deleting()}
+              onClick={(e) => {
+                e.stopPropagation();
+                void runDelete();
+              }}
+            >
+              {deleting() ? "excluindo…" : "excluir"}
+            </button>
+            <button
+              class="rounded px-2 py-0.5 text-[10.5px] text-faint transition hover:bg-fill-2 hover:text-ink"
+              onClick={(e) => {
+                e.stopPropagation();
+                setConfirming(false);
+              }}
+            >
+              cancelar
+            </button>
+          </div>
+        </div>
+      </Show>
 
       <Show when={!props.collapsed && p().runners.length > 0}>
         <ul class="mb-1 ml-[19px] mt-0.5 border-l border-line pl-1">

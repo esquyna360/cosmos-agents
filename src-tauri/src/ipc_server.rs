@@ -170,6 +170,20 @@ fn dispatch(app: &AppHandle, req: Request) -> Response {
             Ok(v) => Response::ok(v),
             Err(e) => Response::err(e.to_string()),
         },
+        Request::ProjectRemove { project } => match handle_project_remove(app, &project) {
+            Ok(v) => Response::ok(v),
+            Err(e) => Response::err(e.to_string()),
+        },
+        Request::ProjectPrune { dry_run } => match handle_project_prune(app, dry_run) {
+            Ok(v) => Response::ok(v),
+            Err(e) => Response::err(e.to_string()),
+        },
+        Request::RunnerRemove { project, name, id } => {
+            match handle_runner_remove(app, project.as_deref(), name.as_deref(), id.as_deref()) {
+                Ok(v) => Response::ok(v),
+                Err(e) => Response::err(e.to_string()),
+            }
+        }
     }
 }
 
@@ -246,6 +260,80 @@ fn handle_runner_list(app: &AppHandle, project: Option<&str>) -> Result<serde_js
         }
     };
     Ok(serde_json::to_value(filtered)?)
+}
+
+fn handle_project_remove(app: &AppHandle, handle: &str) -> Result<serde_json::Value> {
+    let home = home_of(app)?;
+    let project = resolve_project(app, handle)?;
+    let store = app.state::<Store>();
+    let supervisor = app.state::<PtySupervisor>();
+    // Kill first: a PTY outliving its rows would keep writing to a runner
+    // nothing can address any more.
+    supervisor.kill_project(&project.id)?;
+    let removed = projects::delete_project(&home, &store, &project.id)?;
+    let _ = app.emit("projects-changed", json!({ "reason": "ipc.project.rm" }));
+    Ok(json!({ "removed": removed }))
+}
+
+fn handle_project_prune(app: &AppHandle, dry_run: bool) -> Result<serde_json::Value> {
+    let home = home_of(app)?;
+    let store = app.state::<Store>();
+    if dry_run {
+        let found = projects::orphan_project_dirs(&home, &store)?;
+        return Ok(json!({
+            "dryRun": true,
+            "orphans": found.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
+        }));
+    }
+    let moved = projects::prune_orphan_dirs(&home, &store)?;
+    Ok(json!({
+        "dryRun": false,
+        "moved": moved
+            .iter()
+            .map(|(slug, dest)| json!({ "slug": slug, "to": dest.display().to_string() }))
+            .collect::<Vec<_>>(),
+    }))
+}
+
+fn handle_runner_remove(
+    app: &AppHandle,
+    project: Option<&str>,
+    name: Option<&str>,
+    id: Option<&str>,
+) -> Result<serde_json::Value> {
+    let store = app.state::<Store>();
+    let all = projects::runners_list(&store)?;
+    let target = match (id, name) {
+        (Some(id), _) => all
+            .into_iter()
+            .find(|r| r.id == id)
+            .ok_or_else(|| anyhow!("no runner with id `{id}`"))?,
+        (None, Some(name)) => {
+            let handle = project.ok_or_else(|| anyhow!("--name needs --project"))?;
+            let proj = resolve_project(app, handle)?;
+            let mut hits: Vec<_> = all
+                .into_iter()
+                .filter(|r| r.project_id == proj.id && r.name.eq_ignore_ascii_case(name))
+                .collect();
+            match hits.len() {
+                0 => anyhow::bail!("no runner named `{name}` in `{}`", proj.slug),
+                1 => hits.remove(0),
+                n => anyhow::bail!(
+                    "{n} runners named `{name}` in `{}` — address one by --id",
+                    proj.slug
+                ),
+            }
+        }
+        (None, None) => anyhow::bail!("pass --id or --name"),
+    };
+    let supervisor = app.state::<PtySupervisor>();
+    let _ = supervisor.kill(&target.id);
+    store.runners_delete(&target.id)?;
+    let _ = app.emit(
+        "runners-changed",
+        json!({ "reason": "ipc.runner.rm", "projectId": target.project_id }),
+    );
+    Ok(json!({ "removed": target }))
 }
 
 /// Resolves a project handle to a record. `"."` means "use whatever

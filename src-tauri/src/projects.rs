@@ -56,6 +56,79 @@ pub fn memories_dir(home: &Path, slug: &str) -> PathBuf {
     project_dir(home, slug).join("memories")
 }
 
+/// Where a deleted project's dir goes. Under `~/.cosmos/` so the move is a
+/// rename on the same filesystem, and outside `projects/` so it can never be
+/// mistaken for an orphan later.
+pub fn trash_root(home: &Path) -> PathBuf {
+    home.join(".cosmos").join(".trash")
+}
+
+fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Moves `~/.cosmos/projects/<slug>/` into the trash, timestamped. Returns
+/// where it landed, or `None` when there was nothing on disk. Deleting a
+/// project used to leave this dir behind forever — its generated CLAUDE.md
+/// and its memory cards outliving the project by months.
+pub fn trash_project_dir(home: &Path, slug: &str) -> Result<Option<PathBuf>> {
+    let src = project_dir(home, slug);
+    if !src.exists() {
+        return Ok(None);
+    }
+    let root = trash_root(home);
+    std::fs::create_dir_all(&root).context("creating ~/.cosmos/.trash")?;
+    let stamp = now_unix();
+    let mut dest = root.join(format!("{slug}-{stamp}"));
+    let mut n = 2u32;
+    while dest.exists() {
+        dest = root.join(format!("{slug}-{stamp}-{n}"));
+        n += 1;
+    }
+    std::fs::rename(&src, &dest)
+        .with_context(|| format!("moving {} to {}", src.display(), dest.display()))?;
+    Ok(Some(dest))
+}
+
+/// Dirs under `~/.cosmos/projects/` that no project row claims.
+pub fn orphan_project_dirs(home: &Path, store: &Store) -> Result<Vec<PathBuf>> {
+    let known: std::collections::HashSet<String> =
+        store.projects_list()?.into_iter().map(|p| p.slug).collect();
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(projects_root(home)) else {
+        return Ok(out);
+    };
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') || known.contains(&name) {
+            continue;
+        }
+        out.push(entry.path());
+    }
+    out.sort();
+    Ok(out)
+}
+
+/// Sweeps every orphan dir into the trash. Returns what it moved.
+pub fn prune_orphan_dirs(home: &Path, store: &Store) -> Result<Vec<(String, PathBuf)>> {
+    let mut moved = Vec::new();
+    for dir in orphan_project_dirs(home, store)? {
+        let Some(slug) = dir.file_name().map(|s| s.to_string_lossy().into_owned()) else {
+            continue;
+        };
+        if let Some(dest) = trash_project_dir(home, &slug)? {
+            moved.push((slug, dest));
+        }
+    }
+    Ok(moved)
+}
+
 /// Slugify a project name into a filesystem-safe handle. ASCII-only,
 /// lowercase, kebab-case, capped at 40 chars. Returns "project" if the input
 /// has no slug-able chars (so we never produce an empty dir name).
@@ -240,7 +313,13 @@ new project from this session, use the `cosmos` CLI (already on PATH):\n\n",
     );
     out.push_str("# Read-only listing:\n");
     out.push_str("cosmos project list\n");
-    out.push_str("cosmos runner list --project .\n");
+    out.push_str("cosmos runner list --project .\n\n");
+    out.push_str("# Removal (destructive — needs --yes):\n");
+    out.push_str("cosmos runner rm --project . --name \"<name>\" --yes\n");
+    out.push_str("cosmos project rm --project \"<slug>\" --yes\n\n");
+    out.push_str("# Sweep leftover dirs of already-deleted projects into ~/.cosmos/.trash/\n");
+    out.push_str("# (no --yes = dry run):\n");
+    out.push_str("cosmos project prune --yes\n");
     out.push_str("```\n\n");
     out.push_str(
         "`--project .` resolves to this project via `$COSMOS_PROJECT_SLUG`. \
@@ -470,6 +549,34 @@ pub fn create_project(
         eprintln!("cosmos: failed to pre-approve Claude trust dialog: {e}");
     }
 
+    Ok(rec)
+}
+
+/// Deletes a project end-to-end: refuses the master project, drops the rows
+/// (its runners go with them) and moves the materialized dir to the trash.
+/// Killing the PTYs is the caller's job — the supervisor lives outside this
+/// module. Shared by the tauri command and the IPC server so the UI and the
+/// CLI can't drift.
+pub fn delete_project(home: &Path, store: &Store, id: &str) -> Result<ProjectRecord> {
+    let row = store
+        .projects_get(id)?
+        .ok_or_else(|| anyhow::anyhow!("no project with id `{id}`"))?;
+    let rec = row_to_record(row)?;
+    if rec.name.eq_ignore_ascii_case(crate::master::MASTER_NAME) {
+        anyhow::bail!(
+            "`{}` is the master project — boot recreates it, so deleting it \
+             only throws its session away",
+            rec.name
+        );
+    }
+    store.projects_delete(&rec.id)?;
+    // Best-effort: the rows are already gone, so a failed move must not turn
+    // a successful delete into an error the caller has to reconcile.
+    match trash_project_dir(home, &rec.slug) {
+        Ok(Some(dest)) => eprintln!("cosmos: trashed {} -> {}", rec.slug, dest.display()),
+        Ok(None) => {}
+        Err(e) => eprintln!("cosmos: could not trash dir for `{}`: {e}", rec.slug),
+    }
     Ok(rec)
 }
 
@@ -764,5 +871,99 @@ mod tests {
             0,
         );
         assert!(!agent.session_id.is_empty());
+    }
+
+    fn fresh_home(tag: &str) -> PathBuf {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let home = std::env::temp_dir().join(format!("cosmos-{tag}-{ts}"));
+        std::fs::create_dir_all(&home).unwrap();
+        home
+    }
+
+    /// `position` and friends only exist after the migrations run, same as
+    /// on a real boot.
+    fn fresh_store(home: &Path) -> Store {
+        let store = Store::open(home.join("cosmos.sqlite")).unwrap();
+        store.migrate(home).unwrap();
+        store
+    }
+
+    /// The dir used to outlive the project by months. Deleting must take it
+    /// with it — into the trash, not into oblivion.
+    #[test]
+    fn deleting_a_project_trashes_its_dir() {
+        let home = fresh_home("del");
+        let store = fresh_store(&home);
+        let rec = create_project(
+            &home,
+            &store,
+            "Alpha".into(),
+            vec!["/tmp".into()],
+            String::new(),
+            "p1".into(),
+            10,
+        )
+        .unwrap();
+        assert!(project_dir(&home, &rec.slug).exists());
+
+        delete_project(&home, &store, "p1").unwrap();
+
+        assert!(store.projects_get("p1").unwrap().is_none());
+        assert!(!project_dir(&home, &rec.slug).exists());
+        let trashed: Vec<_> = std::fs::read_dir(trash_root(&home))
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(trashed.len(), 1);
+        assert!(trashed[0].starts_with(&rec.slug));
+    }
+
+    /// Boot recreates the master project, so a delete would only cost its
+    /// session. Refuse it in the one place both the UI and the CLI go through.
+    #[test]
+    fn the_master_project_refuses_deletion() {
+        let home = fresh_home("master");
+        let store = fresh_store(&home);
+        create_project(
+            &home,
+            &store,
+            crate::master::MASTER_NAME.into(),
+            vec!["/tmp".into()],
+            String::new(),
+            "m1".into(),
+            10,
+        )
+        .unwrap();
+        assert!(delete_project(&home, &store, "m1").is_err());
+        assert!(store.projects_get("m1").unwrap().is_some());
+    }
+
+    #[test]
+    fn prune_moves_only_dirs_no_project_claims() {
+        let home = fresh_home("prune");
+        let store = fresh_store(&home);
+        let kept = create_project(
+            &home,
+            &store,
+            "Keeper".into(),
+            vec!["/tmp".into()],
+            String::new(),
+            "p1".into(),
+            10,
+        )
+        .unwrap();
+        let orphan = projects_root(&home).join("long-gone");
+        std::fs::create_dir_all(&orphan).unwrap();
+
+        let moved = prune_orphan_dirs(&home, &store).unwrap();
+
+        assert_eq!(moved.len(), 1);
+        assert_eq!(moved[0].0, "long-gone");
+        assert!(!orphan.exists());
+        assert!(project_dir(&home, &kept.slug).exists());
     }
 }

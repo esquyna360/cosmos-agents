@@ -284,8 +284,9 @@ export default function AgentCreatorModal(props: Props) {
                   onClick={() => {
                     const id = props.editingProjectId;
                     if (!id) return;
-                    deleteProject(id).catch(console.error);
-                    props.onClose();
+                    deleteProject(id)
+                      .then(props.onClose)
+                      .catch((e) => setError(String(e)));
                   }}
                 >
                   excluir

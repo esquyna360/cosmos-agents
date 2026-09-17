@@ -740,18 +740,24 @@ export async function sleepProject(id: string): Promise<void> {
   );
 }
 
-/** Deletes a project and every runner under it. Irreversible. */
+/// True for the always-on master project. Boot recreates it, so offering a
+/// delete on that row would be a lie.
+export function isMasterProject(p: { name: string }): boolean {
+  return p.name.trim().toLowerCase() === MASTER_NAME;
+}
+
+/**
+ * Deletes a project and every runner under it. Throws when the backend
+ * refuses (the master project) — the row must not vanish from the sidebar
+ * over a delete that did not happen.
+ */
 export async function deleteProject(id: string): Promise<void> {
   try {
     await ptyKillProject(id);
   } catch (e) {
     console.error("[cosmos] pty_kill_project failed", e);
   }
-  try {
-    await projectsDelete(id);
-  } catch (e) {
-    console.error("[cosmos] projects_delete failed", e);
-  }
+  await projectsDelete(id);
   setState("list", (list) => list.filter((p) => p.id !== id));
   fileStatesByProject.delete(id);
   forgetProject(id);

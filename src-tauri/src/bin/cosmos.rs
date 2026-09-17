@@ -60,6 +60,24 @@ enum ProjectCmd {
         with_agent: Option<String>,
     },
     List,
+    /// Delete a project, its runners and its resumable sessions. The
+    /// project's `~/.cosmos/projects/<slug>/` dir moves to `~/.cosmos/.trash/`;
+    /// the working folders on disk are never touched.
+    Rm {
+        /// Project slug. `.` resolves to $COSMOS_PROJECT_SLUG — which for an
+        /// agent means deleting the project it is running inside.
+        #[arg(long)]
+        project: String,
+        /// Required. Without it the command refuses and explains itself.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Sweep `~/.cosmos/projects/` dirs left behind by already-deleted
+    /// projects into the trash. Without --yes it only lists them.
+    Prune {
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -78,6 +96,20 @@ enum RunnerCmd {
     List {
         #[arg(long)]
         project: Option<String>,
+    },
+    /// Delete a runner: kills its PTY and drops the row, session included.
+    Rm {
+        /// Project the runner lives in. `.` = $COSMOS_PROJECT_SLUG.
+        #[arg(long, default_value = ".")]
+        project: String,
+        /// Runner name. Ambiguous names are refused — use --id instead.
+        #[arg(long)]
+        name: Option<String>,
+        /// Runner id, when the name is ambiguous or unknown.
+        #[arg(long)]
+        id: Option<String>,
+        #[arg(long)]
+        yes: bool,
     },
 }
 
@@ -165,6 +197,18 @@ fn build_request(cli: Cli) -> Result<Request, String> {
                 with_agent,
             },
             ProjectCmd::List => Request::ProjectList,
+            ProjectCmd::Rm { project, yes } => {
+                if !yes {
+                    return Err(
+                        "cosmos: `project rm` deletes the project, every runner in it and \
+their resumable sessions. Re-run with --yes if that is what you want."
+                            .into(),
+                    );
+                }
+                let project = resolve_project_handle(&project)?;
+                Request::ProjectRemove { project }
+            }
+            ProjectCmd::Prune { yes } => Request::ProjectPrune { dry_run: !yes },
         },
         Cmd::Runner { cmd } => match cmd {
             RunnerCmd::Add {
@@ -185,6 +229,29 @@ fn build_request(cli: Cli) -> Result<Request, String> {
                     None => None,
                 };
                 Request::RunnerList { project }
+            }
+            RunnerCmd::Rm {
+                project,
+                name,
+                id,
+                yes,
+            } => {
+                if !yes {
+                    return Err(
+                        "cosmos: `runner rm` kills the runner and throws its session away. \
+Re-run with --yes if that is what you want."
+                            .into(),
+                    );
+                }
+                if name.is_none() && id.is_none() {
+                    return Err("cosmos: pass --name or --id".into());
+                }
+                let project = match name {
+                    // Only a name needs a project to disambiguate against.
+                    Some(_) => Some(resolve_project_handle(&project)?),
+                    None => None,
+                };
+                Request::RunnerRemove { project, name, id }
             }
         },
     })

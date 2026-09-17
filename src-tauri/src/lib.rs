@@ -430,15 +430,19 @@ fn projects_update(
 
 #[tauri::command]
 fn projects_delete(
+    app: AppHandle,
     sup: State<'_, PtySupervisor>,
     store: State<'_, Store>,
     id: String,
 ) -> Result<(), String> {
+    let home = home_dir(&app)?;
     // Kill any live runners first so we don't leave orphan PTYs after the
     // rows are gone.
     sup.kill_project(&id).map_err(|e| e.to_string())?;
-    store.projects_delete(&id).map_err(|e| e.to_string())
+    projects::delete_project(&home, &store, &id).map_err(|e| e.to_string())?;
+    Ok(())
 }
+
 
 /* ----------------------------- runners ----------------------------- */
 

@@ -55,6 +55,15 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
   notifications.
 - **Drag to reorder** projects and runners in the sidebar; double-click any
   name to rename in place. Order is persisted in a `position` column.
+- **Deleting** — a trash icon on the project row: one click when nothing is
+  running, a typed name when agents are live. The project's dir moves to
+  `~/.cosmos/.trash/<slug>-<stamp>/` instead of being left behind; the
+  working folders on disk are never touched. The master project refuses to
+  be deleted, since boot recreates it. From an agent's PTY:
+  `cosmos project rm --project <slug> --yes`,
+  `cosmos runner rm --project . --name <name> --yes`, and
+  `cosmos project prune` to sweep dirs left by projects deleted before any of
+  this existed (lists them; `--yes` moves them).
 - Sidebar resizable; markdown rendering via `marked`.
 
 ## Keymap
@@ -98,6 +107,8 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
   storage; for multi-folder projects also contains `.claude/CLAUDE.md`).
 - Memory cards: `<project-dir>/memories/<title-slug>-<id>.md` with
   `<!-- cosmos-meta {...} -->` first line.
+- Deleted projects: `~/.cosmos/.trash/<slug>-<stamp>/`. Nothing empties it —
+  it is a holding pen, not a bin, so `rm -rf` it when you're sure.
 
 ## Install
 
