@@ -11,6 +11,8 @@ import { createSignal } from "solid-js";
  */
 
 export type ThemeId =
+  | "night"
+  | "day"
   | "midnight"
   | "graphite"
   | "obsidian"
@@ -28,6 +30,20 @@ export interface ThemeSpec {
 }
 
 export const THEMES: ThemeSpec[] = [
+  {
+    id: "night",
+    label: "Noite",
+    hint: "escuro neutro, o padrão",
+    mode: "dark",
+    swatch: ["#111214", "#909cff"],
+  },
+  {
+    id: "day",
+    label: "Dia",
+    hint: "claro neutro",
+    mode: "light",
+    swatch: ["#f3f3f1", "#4450d4"],
+  },
   {
     id: "midnight",
     label: "Midnight",
@@ -72,44 +88,62 @@ export const THEMES: ThemeSpec[] = [
   },
 ];
 
-const KEY = "cosmos.theme.v1";
-const DEFAULT: ThemeId = "midnight";
+export type ThemePref = ThemeId | "system";
 
-function read(): ThemeId {
+const KEY = "cosmos.theme.v2";
+
+function read(): ThemePref {
   const v = localStorage.getItem(KEY);
-  return THEMES.some((t) => t.id === v) ? (v as ThemeId) : DEFAULT;
+  if (v === "system") return "system";
+  return THEMES.some((t) => t.id === v) ? (v as ThemeId) : "system";
 }
 
-const [theme, setThemeRaw] = createSignal<ThemeId>(read());
+const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+
+function resolve(pref: ThemePref): ThemeId {
+  if (pref !== "system") return pref;
+  return systemDark.matches ? "night" : "day";
+}
+
+const [themePref, setThemePrefRaw] = createSignal<ThemePref>(read());
+const [theme, setThemeRaw] = createSignal<ThemeId>(resolve(read()));
 /** Bumped on every theme change so consumers outside the CSS cascade
  *  (xterm, CodeMirror) can re-read the palette. */
 const [themeTick, setThemeTick] = createSignal(0);
 
-export { theme, themeTick };
+export { theme, themePref, themeTick };
 
 export function themeSpec(id: ThemeId = theme()): ThemeSpec {
   return THEMES.find((t) => t.id === id) ?? THEMES[0];
 }
 
-export function applyTheme(id: ThemeId): void {
+function paint(id: ThemeId): void {
   document.documentElement.setAttribute("data-theme", id);
   setThemeRaw(id);
   setThemeTick((n) => n + 1);
+}
+
+export function applyTheme(pref: ThemePref): void {
+  setThemePrefRaw(pref);
+  paint(resolve(pref));
   try {
-    localStorage.setItem(KEY, id);
+    localStorage.setItem(KEY, pref);
   } catch {
     /* private mode — the theme just won't survive a restart */
   }
 }
 
+/** ⌘⇧T flips between light and dark, whatever palette is active. */
 export function cycleTheme(): void {
-  const i = THEMES.findIndex((t) => t.id === theme());
-  applyTheme(THEMES[(i + 1) % THEMES.length].id);
+  applyTheme(themeSpec().mode === "dark" ? "day" : "night");
 }
 
 /** Call once at boot, before first paint, so there is no flash of the default. */
 export function initTheme(): void {
   document.documentElement.setAttribute("data-theme", theme());
+  systemDark.addEventListener("change", () => {
+    if (themePref() === "system") paint(resolve("system"));
+  });
 }
 
 function cssVar(name: string, fallback: string): string {
@@ -121,7 +155,7 @@ function cssVar(name: string, fallback: string): string {
 
 /** The active theme's palette, shaped for xterm.js's `ITheme`. */
 export function readTerminalPalette() {
-  const bg = cssVar("--term-bg", "#0d0f16");
+  const bg = cssVar("--term-bg", "#111214");
   const fg = cssVar("--term-fg", "#e8ecf4");
   const dim = cssVar("--text-faint", "#5f6879");
   const accent = cssVar("--accent", "#7aa2ff");

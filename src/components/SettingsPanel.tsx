@@ -11,7 +11,7 @@ import {
 } from "lucide-solid";
 
 import { setSettingsOpen } from "../stores/layout";
-import { applyTheme, theme, THEMES } from "../stores/theme";
+import { applyTheme, theme, themePref, THEMES } from "../stores/theme";
 import {
   autoCheck,
   autoInstall,
@@ -109,11 +109,27 @@ export default function SettingsPanel() {
 function ThemeSection() {
   return (
     <section class="flex flex-col gap-3">
-      <SectionTitle icon={Palette} title="tema" hint="⌘⇧T cicla" />
+      <SectionTitle icon={Palette} title="tema" hint="⌘⇧T alterna claro e escuro" />
+      <button
+        class="flex items-center justify-between rounded-cx border p-2.5 text-left text-[12.5px] transition"
+        classList={{
+          "border-accent bg-accent-soft": themePref() === "system",
+          "border-line hover:border-line-strong hover:bg-fill-1": themePref() !== "system",
+        }}
+        onClick={() => applyTheme("system")}
+      >
+        <span>
+          <span class="block font-medium">Seguir o sistema</span>
+          <span class="block text-[10.5px] text-faint">Claro de dia, escuro à noite, conforme o macOS</span>
+        </span>
+        <Show when={themePref() === "system"}>
+          <Check size={11} class="shrink-0 text-accent" />
+        </Show>
+      </button>
       <div class="grid grid-cols-2 gap-2">
         <For each={THEMES}>
           {(t) => {
-            const active = () => theme() === t.id;
+            const active = () => themePref() !== "system" && theme() === t.id;
             return (
               <button
                 class="flex items-center gap-2.5 rounded-cx border p-2.5 text-left transition"

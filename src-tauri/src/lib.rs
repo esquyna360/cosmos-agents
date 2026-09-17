@@ -1,3 +1,5 @@
+mod agent_proc;
+mod claude_session;
 mod clis;
 mod fs_ops;
 pub mod ipc;
@@ -12,8 +14,10 @@ mod store;
 mod tunnel;
 mod web;
 
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use agent_proc::{AgentLine, AgentSupervisor, SpawnSpec};
 use clis::CliInfo;
 use memory::MemoryCard;
 use projects::{ProjectRecord, RunnerRecord};
@@ -90,7 +94,12 @@ fn pty_spawn(
 /// button does now: the conversation stays resumable, and reopening the tab
 /// respawns with `--resume`.
 #[tauri::command]
-fn runners_stop(sup: State<'_, PtySupervisor>, id: String) -> Result<(), String> {
+fn runners_stop(
+    sup: State<'_, PtySupervisor>,
+    agents: State<'_, Arc<AgentSupervisor>>,
+    id: String,
+) -> Result<(), String> {
+    agents.kill(&id);
     sup.kill(&id).map_err(|e| e.to_string())
 }
 
@@ -98,7 +107,12 @@ fn runners_stop(sup: State<'_, PtySupervisor>, id: String) -> Result<(), String>
 /// project is a view operation, not a destructive one — `projects_delete`
 /// stays available behind an explicit confirm in the editor modal.
 #[tauri::command]
-fn projects_close(sup: State<'_, PtySupervisor>, id: String) -> Result<(), String> {
+fn projects_close(
+    sup: State<'_, PtySupervisor>,
+    agents: State<'_, Arc<AgentSupervisor>>,
+    id: String,
+) -> Result<(), String> {
+    agents.kill_project(&id);
     sup.kill_project(&id).map_err(|e| e.to_string())
 }
 
@@ -118,13 +132,22 @@ fn runners_reset_session(store: State<'_, Store>, id: String) -> Result<(), Stri
 }
 
 #[tauri::command]
-fn pty_kill_project(sup: State<'_, PtySupervisor>, project_id: String) -> Result<(), String> {
+fn pty_kill_project(
+    sup: State<'_, PtySupervisor>,
+    agents: State<'_, Arc<AgentSupervisor>>,
+    project_id: String,
+) -> Result<(), String> {
+    agents.kill_project(&project_id);
     sup.kill_project(&project_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn pty_status(sup: State<'_, PtySupervisor>, id: String) -> Option<Status> {
-    sup.status(&id)
+fn pty_status(
+    sup: State<'_, PtySupervisor>,
+    agents: State<'_, Arc<AgentSupervisor>>,
+    id: String,
+) -> Option<Status> {
+    agents.status(&id).or_else(|| sup.status(&id))
 }
 
 #[tauri::command]
@@ -162,8 +185,13 @@ fn pty_kill(sup: State<'_, PtySupervisor>, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn pty_live_ids(sup: State<'_, PtySupervisor>) -> Vec<String> {
-    sup.list()
+fn pty_live_ids(
+    sup: State<'_, PtySupervisor>,
+    agents: State<'_, Arc<AgentSupervisor>>,
+) -> Vec<String> {
+    let mut ids = sup.list();
+    ids.extend(agents.list());
+    ids
 }
 
 #[tauri::command]
@@ -335,6 +363,33 @@ fn app_version(app: AppHandle) -> String {
 
 /// Hands a URL to the OS browser. The in-app preview is an iframe, so any site
 /// that refuses framing needs an escape hatch.
+/// Reveals a project folder in the file manager, or hands it to an editor.
+#[tauri::command]
+fn open_path(path: String, app: Option<String>) -> Result<(), String> {
+    if !std::path::Path::new(&path).exists() {
+        return Err(format!("caminho não existe: {path}"));
+    }
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("open");
+        if let Some(app) = app.as_deref().filter(|a| !a.is_empty()) {
+            c.args(["-a", app]);
+        }
+        c
+    };
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let _ = &app;
+        std::process::Command::new("explorer")
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut cmd = {
+        let _ = &app;
+        std::process::Command::new("xdg-open")
+    };
+    cmd.arg(&path).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn open_external(url: String) -> Result<(), String> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
@@ -432,10 +487,12 @@ fn projects_update(
 fn projects_delete(
     app: AppHandle,
     sup: State<'_, PtySupervisor>,
+    agents: State<'_, Arc<AgentSupervisor>>,
     store: State<'_, Store>,
     id: String,
 ) -> Result<(), String> {
     let home = home_dir(&app)?;
+    agents.kill_project(&id);
     // Kill any live runners first so we don't leave orphan PTYs after the
     // rows are gone.
     sup.kill_project(&id).map_err(|e| e.to_string())?;
@@ -461,8 +518,10 @@ fn runners_create(
     program: Option<String>,
     args: Option<Vec<String>>,
     env: Option<std::collections::HashMap<String, String>>,
+    mode: Option<String>,
+    name_auto: Option<bool>,
 ) -> Result<RunnerRecord, String> {
-    let rec = projects::build_runner_record(
+    let mut rec = projects::build_runner_record(
         uuid_v4(),
         project_id,
         kind,
@@ -472,6 +531,10 @@ fn runners_create(
         env,
         now_unix(),
     );
+    if mode.as_deref() == Some("chat") && projects::is_claude_command(&rec.args) {
+        rec.mode = "chat".into();
+    }
+    rec.name_auto = name_auto.unwrap_or(false);
     let row = projects::runner_record_to_row(&rec).map_err(|e| e.to_string())?;
     store.runners_upsert(&row).map_err(|e| e.to_string())?;
     Ok(rec)
@@ -482,24 +545,168 @@ fn runners_update(
     store: State<'_, Store>,
     id: String,
     name: String,
+    auto: Option<bool>,
 ) -> Result<(), String> {
-    let all = projects::runners_list(&store).map_err(|e| e.to_string())?;
-    let mut found = all
-        .into_iter()
-        .find(|r| r.id == id)
-        .ok_or_else(|| "runner not found".to_string())?;
+    let mut found = runner_record(&store, &id)?;
     found.name = name;
+    found.name_auto = auto.unwrap_or(false);
     found.last_active = now_unix();
     let row = projects::runner_record_to_row(&found).map_err(|e| e.to_string())?;
     store.runners_upsert(&row).map_err(|e| e.to_string())
 }
 
+fn runner_record(store: &Store, id: &str) -> Result<RunnerRecord, String> {
+    store
+        .runners_get(id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "runner not found".to_string())
+        .and_then(|row| projects::runner_row_to_record(row).map_err(|e| e.to_string()))
+}
+
+/// Chat and terminal are two front ends for the same Claude session; the
+/// caller stops whichever process is running before flipping this.
+#[tauri::command]
+fn runners_set_mode(store: State<'_, Store>, id: String, mode: String) -> Result<(), String> {
+    let mut found = runner_record(&store, &id)?;
+    found.mode = if mode == "chat" && projects::is_claude_command(&found.args) {
+        "chat".into()
+    } else {
+        "tty".into()
+    };
+    let row = projects::runner_record_to_row(&found).map_err(|e| e.to_string())?;
+    store.runners_upsert(&row).map_err(|e| e.to_string())
+}
+
+/* ------------------------------ chat ------------------------------ */
+
+#[tauri::command]
+fn agent_start(
+    app: AppHandle,
+    agents: State<'_, Arc<AgentSupervisor>>,
+    store: State<'_, Store>,
+    id: String,
+    cwd: String,
+    model: Option<String>,
+    permission_mode: String,
+) -> Result<(), String> {
+    if agents.is_live(&id) {
+        return Ok(());
+    }
+    let rec = runner_record(&store, &id)?;
+    if !projects::is_claude_command(&rec.args) {
+        return Err("esta sessão não roda o Claude Code".into());
+    }
+    let home = home_dir(&app)?;
+    let opts = projects::ChatOptions {
+        model: model.as_deref(),
+        permission_mode: &permission_mode,
+    };
+    let args = projects::chat_args_for(&home, &rec, &cwd, &opts);
+    let project_slug = store
+        .projects_get(&rec.project_id)
+        .ok()
+        .flatten()
+        .map(|r| r.slug)
+        .unwrap_or_default();
+    let spec = SpawnSpec {
+        id,
+        project_id: rec.project_id.clone(),
+        project_slug,
+        cwd,
+        program: rec.program.clone(),
+        args,
+        env: rec.env.clone(),
+    };
+    agents.spawn(app, spec).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn agent_send(
+    agents: State<'_, Arc<AgentSupervisor>>,
+    id: String,
+    line: String,
+) -> Result<(), String> {
+    agents.send(&id, &line).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn agent_snapshot(
+    agents: State<'_, Arc<AgentSupervisor>>,
+    id: String,
+    after: Option<u64>,
+) -> Vec<AgentLine> {
+    agents.snapshot(&id, after.unwrap_or(0))
+}
+
+#[tauri::command]
+fn agent_kill(agents: State<'_, Arc<AgentSupervisor>>, id: String) {
+    agents.kill(&id);
+}
+
+/// The stored conversation, for a chat that opens with no process behind it.
+#[tauri::command]
+async fn agent_history(
+    app: AppHandle,
+    store: State<'_, Store>,
+    id: String,
+    cwd: String,
+) -> Result<Vec<String>, String> {
+    let rec = runner_record(&store, &id)?;
+    let path = claude_session::transcript_path(&home_dir(&app)?, &cwd, &rec.session_id);
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    tauri::async_runtime::spawn_blocking(move || claude_session::read_history(&path))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn session_title_get(
+    app: AppHandle,
+    store: State<'_, Store>,
+    id: String,
+    cwd: String,
+) -> Result<claude_session::SessionTitle, String> {
+    let rec = runner_record(&store, &id)?;
+    let path = claude_session::transcript_path(&home_dir(&app)?, &cwd, &rec.session_id);
+    if !path.exists() {
+        return Ok(Default::default());
+    }
+    claude_session::read_title(&path).map_err(|e| e.to_string())
+}
+
+/// Writes the title into the transcript. Refused while a process owns the
+/// session: a live CLI must be renamed through its own channel, or it
+/// re-appends the title it still holds.
+#[tauri::command]
+fn session_title_set(
+    app: AppHandle,
+    sup: State<'_, PtySupervisor>,
+    agents: State<'_, Arc<AgentSupervisor>>,
+    store: State<'_, Store>,
+    id: String,
+    cwd: String,
+    title: String,
+) -> Result<bool, String> {
+    if agents.is_live(&id) || sup.list().contains(&id) {
+        return Ok(false);
+    }
+    let rec = runner_record(&store, &id)?;
+    let path = claude_session::transcript_path(&home_dir(&app)?, &cwd, &rec.session_id);
+    claude_session::append_title(&path, &rec.session_id, &title).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
 #[tauri::command]
 fn runners_delete(
     sup: State<'_, PtySupervisor>,
+    agents: State<'_, Arc<AgentSupervisor>>,
     store: State<'_, Store>,
     id: String,
 ) -> Result<(), String> {
+    agents.kill(&id);
     let _ = sup.kill(&id);
     store.runners_delete(&id).map_err(|e| e.to_string())
 }
@@ -635,6 +842,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(PtySupervisor::new())
+        .manage(Arc::new(AgentSupervisor::new()))
         .setup(|app| {
             let data_dir = app.path().app_local_data_dir()?;
             let store = Store::open(data_dir.join("cosmos.sqlite"))?;
@@ -680,6 +888,7 @@ pub fn run() {
             runners_reorder,
             app_version,
             open_external,
+            open_path,
             pty_spawn,
             pty_status,
             pty_attach,
@@ -710,7 +919,15 @@ pub fn run() {
             runners_update,
             runners_delete,
             runners_stop,
+            runners_set_mode,
             runners_reset_session,
+            agent_start,
+            agent_send,
+            agent_snapshot,
+            agent_history,
+            agent_kill,
+            session_title_get,
+            session_title_set,
             projects_close,
             pty_kill_project,
             memories_list,

@@ -12,11 +12,29 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
 - **Projects** with 1..6 working folders. Each project lives at
   `~/.cosmos/projects/<slug>/`. Sticky slug = filesystem handle that doesn't
   move on rename. Names are unique (case-insensitive).
-- **Runners** as tabs inside the project main pane:
-  - `agent` — runs an AI CLI under a PTY with a heuristic FSM that infers
-    `idle / streaming / tool_running / awaiting_input` from the byte stream.
-  - `shell` — interactive zsh. Or a one-click `+ shell` dropdown of detected
-    `package.json` scripts (pnpm/yarn/bun/npm picked from lockfile).
+- **Sessions** — the unit of work is a session, listed under its project in
+  the sidebar with a status glyph, what it is doing right now and when it
+  last moved. Anything waiting on you, in any project, is pulled up into
+  "Precisa de você". `⌘K` jumps to any session.
+  - A Claude Code session opens as a **native chat**: Cosmos runs
+    `claude -p` with stream-json on both pipes (`agent_proc.rs` is a dumb
+    line pipe; the protocol lives in `src/lib/claudeProtocol.ts` and
+    `src/stores/chat.ts`). Tool calls collapse to one line and expand to a
+    diff or output, permission prompts and `AskUserQuestion` become cards,
+    messages sent mid-turn queue up, and the composer takes `@file`,
+    `/command`, pasted images, model and permission mode.
+  - The **Chat | Terminal** switch (`⌘J`) reopens the same conversation as
+    the raw Claude Code TUI in a PTY (`--resume`), and back.
+  - **Names sync with Claude.** A new session is not given `--name`, so
+    Claude titles it after the first prompt and Cosmos adopts that title from
+    the transcript. Renaming in Cosmos renames the Claude session
+    (`rename_session`, `/rename`, or a `custom-title` line when nothing is
+    running); a `/rename` inside Claude renames it in Cosmos.
+  - Other CLIs (Codex…) and shells stay terminals: `agent` runs under a PTY
+    with a heuristic FSM inferring `idle / streaming / tool_running /
+    awaiting_input` from the byte stream; `shell` is an interactive zsh.
+  - The terminal understands macOS editing chords (`⌘←/→`, `⌘⌫`), `⌘F`
+    search, `⌘+/−` font size, `⌘`-click links and keeps 50k lines.
 - **CLI presets** with `$PATH` detection — Claude Code and Codex out of the
   box, "not installed" shown when the binary isn't on PATH. Picker when
   spawning a new agent or creating a project.
@@ -39,10 +57,10 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
   transcript exists under `~/.claude/projects/`. Stopping a runner or
   sleeping a project kills the PTY and keeps the row, so clicking it again
   picks the conversation back up.
-- **Themes** — six palettes (Midnight, Graphite, Obsidian, Ember, Dawn,
-  Paper) driven entirely by CSS variables, so a swap is one attribute on
+- **Themes** — Night and Day by default (or follow the system), plus six
+  older palettes, driven entirely by CSS variables, so a swap is one attribute on
   `<html>`. The terminal and the code editor read the same variables, so
-  nothing is left behind on the old palette. `⌘⇧T` cycles.
+  nothing is left behind on the old palette. `⌘⇧T` flips light/dark.
 - **Browser pane** — an iframe preview with a URL bar, back/forward/reload
   and chips for whichever localhost ports are actually listening (probed with
   an opaque `no-cors` fetch). Anything that refuses framing opens in the
@@ -71,7 +89,9 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
 | | |
 |---|---|
 | `⌘T` | new project |
-| `⌘⇧N` | new agent runner in current project |
+| `⌘N` / `⌘⇧N` | new session / new terminal in the current project |
+| `⌘K` | jump to any session |
+| `⌘J` | same session as chat ↔ terminal |
 | `⌘W` | stop the focused runner (keeps it — click to resume) |
 | `⌘⇧W` | stop every runner of the project |
 | `⌘1–9` | focus N-th project |
@@ -81,10 +101,9 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
 | `⌘B` | show/hide the project sidebar |
 | `⌘E` | cycle view (runners → editor → diff → memory → browser) |
 | `⌘P` / `⌘⇧F` | file palette / grep |
-| `⌘I` | toggle composer |
 | `⌘D` | workflow overview |
 | `⌘,` | settings |
-| `⌘⇧T` | next theme |
+| `⌘⇧T` | light ↔ dark |
 | `⌘F` | find/replace inside the editor |
 | `⌘S` | save now (files autosave anyway) |
 

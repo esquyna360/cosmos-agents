@@ -9,7 +9,7 @@
  * `false` and drops.
  */
 
-const now = Date.now();
+const now = Math.floor(Date.now() / 1000);
 
 const PROJECTS = [
   {
@@ -19,7 +19,7 @@ const PROJECTS = [
     folders: ["/Users/bruno/code/metamorfosis-root/repos/metamorfosis_flutter"],
     memory: "Flutter + Firebase. Release pela Codemagic.",
     cwd: "/Users/bruno/code/metamorfosis-root/repos/metamorfosis_flutter",
-    created_at: now - 86_400_000 * 40,
+    created_at: now - 86_400 * 40,
   },
   {
     id: "p-cosmos",
@@ -28,7 +28,7 @@ const PROJECTS = [
     folders: ["/Users/bruno/code/cosmos-agents", "/Users/bruno/code/.dev-logs"],
     memory: "",
     cwd: "/Users/bruno/code/cosmos-agents",
-    created_at: now - 86_400_000 * 12,
+    created_at: now - 86_400 * 12,
   },
   {
     id: "p-iquit",
@@ -37,18 +37,19 @@ const PROJECTS = [
     folders: ["/Users/bruno/code/iquit"],
     memory: "",
     cwd: "/Users/bruno/code/iquit",
-    created_at: now - 86_400_000 * 90,
+    created_at: now - 86_400 * 90,
   },
 ];
 
 const RUNNERS = (
   [
-    ["r1", "p-metamorfosis", "agent", "Build iOS", "claude"],
+    ["r1", "p-metamorfosis", "agent", "Corrigir build iOS na Codemagic", "claude"],
     ["r2", "p-metamorfosis", "shell", "fastlane", "zsh"],
-    ["r3", "p-cosmos", "agent", "UX overhaul", "claude"],
-    ["r4", "p-cosmos", "agent", "Release", "claude"],
+    ["r3", "p-cosmos", "agent", "Fila de mensagens do chat", "claude"],
+    ["r4", "p-cosmos", "agent", "Release 0.4 com auto-update", "claude"],
     ["r5", "p-cosmos", "shell", "vite", "zsh"],
-    ["r6", "p-iquit", "agent", "Onboarding copy", "claude"],
+    ["r6", "p-iquit", "agent", "Textos do onboarding", "claude"],
+    ["r7", "p-iquit", "agent", "Nova sessão", "claude"],
   ] as const
 ).map(([id, projectId, kind, name, program], i) => ({
   id,
@@ -56,22 +57,88 @@ const RUNNERS = (
   kind,
   name,
   program,
-  args: kind === "agent" ? ["--dangerously-skip-permissions"] : [],
+  args: kind === "agent" ? ["-c", "exec claude --dangerously-skip-permissions"] : [],
   env: {},
   with_status_fsm: kind === "agent",
-  created_at: now - 3_600_000 * (i + 1),
-  last_active: now - 60_000 * i,
+  created_at: now - 3600 * (i + 1),
+  last_active: now - 60 * i * i * 7,
   session_id: kind === "agent" ? `sess-${id}` : "",
+  mode: kind === "agent" && id !== "r1" ? "chat" : "tty",
+  name_auto: id === "r7",
 }));
 
 const STATUSES: Record<string, string> = {
   r1: "tool_running",
   r2: "running",
-  r3: "streaming",
+  r3: "idle",
   r4: "awaiting_input",
   r5: "running",
-  r6: "idle",
 };
+
+const ROOT = "/Users/bruno/code/cosmos-agents";
+const j = (v: unknown) => JSON.stringify(v);
+const asst = (id: string, content: unknown[]) =>
+  j({ type: "assistant", uuid: id, message: { id, model: "claude-opus-5", content, usage: { input_tokens: 4200, cache_read_input_tokens: 61000 } } });
+const user = (id: string, content: unknown) => j({ type: "user", uuid: id, message: { role: "user", content } });
+
+const HISTORY: Record<string, string[]> = {
+  r3: [
+    user("u1", "As mensagens que mando enquanto o agente trabalha somem. Descobre por que e arruma."),
+    asst("a1", [{ type: "thinking", thinking: "Preciso ver como o store trata envio com turno em andamento." }]),
+    asst("a2", [{ type: "text", text: "Vou olhar como o store do chat trata um envio quando já existe um turno rodando." }]),
+    asst("a3", [{ type: "tool_use", id: "t1", name: "Grep", input: { pattern: "busy", path: `${ROOT}/src/stores` } }]),
+    user("u2", [{ type: "tool_result", tool_use_id: "t1", content: "src/stores/chat.ts:504: const waiting = state.busy;" }]),
+    asst("a4", [{ type: "tool_use", id: "t2", name: "Read", input: { file_path: `${ROOT}/src/stores/chat.ts` } }]),
+    user("u3", [{ type: "tool_result", tool_use_id: "t2", content: "export function send(...) { ... }" }]),
+    asst("a5", [{ type: "tool_use", id: "t3", name: "Edit", input: { file_path: `${ROOT}/src/stores/chat.ts`, old_string: "  if (state.busy) return;", new_string: "  if (state.busy) {\n    queue.push(message);\n    return;\n  }" } }]),
+    user("u4", [{ type: "tool_result", tool_use_id: "t3", content: "The file has been updated." }]),
+    asst("a6", [{ type: "tool_use", id: "t4", name: "Bash", input: { command: "pnpm tsc --noEmit", description: "Checar tipos" } }]),
+    user("u5", [{ type: "tool_result", tool_use_id: "t4", content: "" }]),
+    asst("a7", [{ type: "text", text: "Achei. `send` retornava cedo quando `busy` era verdadeiro, então a mensagem nunca saía do cliente.\n\nAgora ela entra numa fila e é despachada quando o turno termina:\n\n- aparece na conversa marcada como **Na fila**, com um botão para desistir\n- `Parar` interrompe o turno e limpa a fila\n\nOs tipos passam. Não rodei o app; vale testar mandando duas mensagens seguidas." }]),
+  ],
+  r6: [
+    user("u1", "Reescreve os três textos do onboarding em um tom mais direto."),
+    asst("a1", [{ type: "text", text: "Feito. Os três ficaram com uma frase só cada, sem exclamação. Quer que eu aplique também na versão em espanhol?" }]),
+  ],
+};
+
+const SNAPSHOT: Record<string, string[]> = {
+  r4: [
+    asst("b1", [{ type: "text", text: "A versão está em 0.4.0 no `tauri.conf.json` e no `Cargo.toml`. Falta publicar a tag para o updater enxergar." }]),
+    asst("b2", [{ type: "tool_use", id: "p1", name: "Bash", input: { command: "git tag v0.4.0 && git push origin v0.4.0", description: "Publicar a tag v0.4.0" } }]),
+    j({ type: "control_request", request_id: "req-1", request: { subtype: "can_use_tool", tool_name: "Bash", tool_use_id: "p1", input: { command: "git tag v0.4.0 && git push origin v0.4.0", description: "Publicar a tag v0.4.0" } } }),
+  ],
+};
+
+const listeners: { event: string; handler: number }[] = [];
+
+function emit(event: string, payload: unknown): void {
+  const cbs = (window as unknown as { __TAURI_MOCK_CBS__: Record<number, (v: unknown) => void> }).__TAURI_MOCK_CBS__;
+  for (const l of listeners) if (l.event === event) cbs[l.handler]?.({ event, payload, id: 0 });
+}
+
+/** A canned turn, so the streaming states can be looked at in a browser. */
+function fakeTurn(runnerId: string): void {
+  let seq = 1000 + Math.floor(Math.random() * 1e6);
+  const line = (v: unknown) => emit("agent-line", { runnerId, seq: seq++, line: j(v) });
+  const status = (s: string) => emit("runner-status", { projectId: "p-cosmos", runnerId, status: s });
+  const words = "Certo. Isto é uma resposta simulada: no app de verdade, é o Claude Code que responde aqui, com as mesmas ferramentas do terminal.".split(" ");
+  status("streaming");
+  setTimeout(() => {
+    line({ type: "stream_event", parent_tool_use_id: null, event: { type: "message_start", message: { id: `m${seq}` } } });
+    line({ type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } } });
+    words.forEach((w, i) =>
+      setTimeout(
+        () => line({ type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: `${w} ` } } }),
+        i * 45,
+      ),
+    );
+    setTimeout(() => {
+      line({ type: "result", subtype: "success", is_error: false, total_cost_usd: 0.42, num_turns: 3, usage: { output_tokens: 180 } });
+      status("idle");
+    }, words.length * 45 + 200);
+  }, 900);
+}
 
 const E = "\x1b[";
 const BANNER = [
@@ -152,6 +219,27 @@ function SAMPLE(path: string): string {
 }
 
 const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
+  "plugin:event|listen": (args) => {
+    listeners.push({ event: String(args.event), handler: Number(args.handler) });
+    if (args.event === "runner-status") {
+      setTimeout(() => {
+        for (const [runnerId, status] of Object.entries(STATUSES)) {
+          const projectId = RUNNERS.find((r) => r.id === runnerId)?.project_id;
+          emit("runner-status", { projectId, runnerId, status });
+        }
+      }, 300);
+    }
+    return listeners.length;
+  },
+  agent_history: (args) => HISTORY[String(args.id)] ?? [],
+  agent_snapshot: (args) => (SNAPSHOT[String(args.id)] ?? []).map((line, i) => ({ runnerId: args.id, seq: i + 1, line })),
+  agent_send: (args) => {
+    if (String(args.line).includes('"type":"user"')) fakeTurn(String(args.id));
+    if (String(args.line).includes('"control_response"'))
+      emit("runner-status", { projectId: "p-cosmos", runnerId: args.id, status: "idle" });
+    return null;
+  },
+  session_title_get: () => ({ custom: null, ai: null }),
   projects_list: () => PROJECTS,
   runners_list: () => RUNNERS,
   pty_live_ids: () => Object.keys(STATUSES),
@@ -193,7 +281,18 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   fs_grep: () => [],
   fs_read_package_scripts: () => ({ dev: "vite", build: "vite build" }),
   fs_read_file: (args) => SAMPLE(String(args.path ?? "file.ts")),
-  git_diff: () => "",
+  git_diff: () =>
+    [
+      "diff --git a/src/stores/chat.ts b/src/stores/chat.ts",
+      "--- a/src/stores/chat.ts",
+      "+++ b/src/stores/chat.ts",
+      "@@ -504,3 +504,6 @@ export function send(",
+      "-  if (state.busy) return;",
+      "+  if (state.busy) {",
+      "+    queue.push(message);",
+      "+    return;",
+      "+  }",
+    ].join("\n"),
   memories_list: () => [],
   pty_attach: (args) => {
     const output = args.output as { onmessage?: (m: unknown) => void } | undefined;

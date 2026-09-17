@@ -66,6 +66,12 @@ pub struct RunnerRow {
     /// `claude --resume` on every respawn after that. Empty for shells and
     /// for agent presets whose CLI we don't know how to resume.
     pub session_id: String,
+    /// "chat" (headless stream-json, native UI) or "tty" (the CLI's own TUI
+    /// in a PTY). Both drive the same Claude session.
+    pub mode: String,
+    /// True while the name is machine-written, so an auto-title may replace
+    /// it. A rename by hand clears it.
+    pub name_auto: bool,
 }
 
 impl Store {
@@ -156,6 +162,9 @@ impl Store {
         }
         if user_version < 4 {
             Self::migrate_v3_to_v4(&mut conn)?;
+        }
+        if user_version < 5 {
+            Self::migrate_v4_to_v5(&mut conn)?;
         }
         Ok(())
     }
@@ -392,6 +401,17 @@ impl Store {
         Ok(())
     }
 
+    /// v4 → v5: agents can run as a native chat or as the CLI's TUI. Rows
+    /// that predate the chat stay on the TUI they were created for.
+    fn migrate_v4_to_v5(conn: &mut Connection) -> Result<()> {
+        let tx = conn.transaction()?;
+        Self::ensure_column(&tx, "runners", "mode", "TEXT NOT NULL DEFAULT 'tty'")?;
+        Self::ensure_column(&tx, "runners", "name_auto", "INTEGER NOT NULL DEFAULT 0")?;
+        tx.execute_batch("PRAGMA user_version = 5")?;
+        tx.commit().context("committing v4→v5 migration")?;
+        Ok(())
+    }
+
     /// Writes a new order for the given ids. Anything not named keeps its
     /// slot at the end, so a stale list from the UI can't drop a row.
     pub fn reorder(&self, table: &str, ids: &[String]) -> Result<()> {
@@ -510,7 +530,8 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, project_id, kind, name, program, args_json, env_json, \
-                    with_status_fsm, created_at, last_active, session_id \
+                    with_status_fsm, created_at, last_active, session_id, \
+                    mode, name_auto \
              FROM runners ORDER BY position ASC, last_active DESC",
         )?;
         let rows = stmt
@@ -527,6 +548,8 @@ impl Store {
                     created_at: row.get(8)?,
                     last_active: row.get(9)?,
                     session_id: row.get(10)?,
+                    mode: row.get(11)?,
+                    name_auto: row.get::<_, i64>(12)? != 0,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -537,7 +560,8 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, project_id, kind, name, program, args_json, env_json, \
-                    with_status_fsm, created_at, last_active, session_id \
+                    with_status_fsm, created_at, last_active, session_id, \
+                    mode, name_auto \
              FROM runners WHERE id = ?1",
         )?;
         let mut rows = stmt.query(params![id])?;
@@ -554,6 +578,8 @@ impl Store {
                 created_at: row.get(8)?,
                 last_active: row.get(9)?,
                 session_id: row.get(10)?,
+                mode: row.get(11)?,
+                name_auto: row.get::<_, i64>(12)? != 0,
             }))
         } else {
             Ok(None)
@@ -566,8 +592,9 @@ impl Store {
             r#"
             INSERT INTO runners
                 (id, project_id, kind, name, program, args_json, env_json,
-                 with_status_fsm, created_at, last_active, session_id, position)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                 with_status_fsm, created_at, last_active, session_id, mode,
+                 name_auto, position)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
                     (SELECT COALESCE(MAX(position), -1) + 1 FROM runners))
             ON CONFLICT(id) DO UPDATE SET
                 project_id = excluded.project_id,
@@ -578,7 +605,9 @@ impl Store {
                 env_json = excluded.env_json,
                 with_status_fsm = excluded.with_status_fsm,
                 last_active = excluded.last_active,
-                session_id = excluded.session_id
+                session_id = excluded.session_id,
+                mode = excluded.mode,
+                name_auto = excluded.name_auto
             "#,
             params![
                 row.id,
@@ -592,6 +621,8 @@ impl Store {
                 row.created_at,
                 row.last_active,
                 row.session_id,
+                row.mode,
+                row.name_auto as i64,
             ],
         )?;
         Ok(())

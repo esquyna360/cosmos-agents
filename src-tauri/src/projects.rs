@@ -39,6 +39,14 @@ pub struct RunnerRecord {
     /// closing Cosmos no longer throws the conversation away.
     #[serde(default)]
     pub session_id: String,
+    #[serde(default = "default_mode")]
+    pub mode: String,
+    #[serde(default)]
+    pub name_auto: bool,
+}
+
+fn default_mode() -> String {
+    "tty".to_string()
 }
 
 pub fn projects_root(home: &Path) -> PathBuf {
@@ -441,6 +449,8 @@ pub fn runner_row_to_record(row: RunnerRow) -> Result<RunnerRecord> {
         created_at: row.created_at,
         last_active: row.last_active,
         session_id: row.session_id,
+        mode: row.mode,
+        name_auto: row.name_auto,
     })
 }
 
@@ -459,6 +469,8 @@ pub fn runner_record_to_row(rec: &RunnerRecord) -> Result<RunnerRow> {
         created_at: rec.created_at,
         last_active: rec.last_active,
         session_id: rec.session_id.clone(),
+        mode: rec.mode.clone(),
+        name_auto: rec.name_auto,
     })
 }
 
@@ -640,7 +652,7 @@ pub fn claude_session_exists(home: &Path, cwd: &str, session_id: &str) -> bool {
 /// boot, pins the id Claude will write under).
 pub fn build_spawn_args(
     args: &[String],
-    name: &str,
+    name: Option<&str>,
     session_id: &str,
     resume: bool,
 ) -> Vec<String> {
@@ -649,9 +661,13 @@ pub fn build_spawn_args(
             if !a.contains(CLAUDE_NEEDLE) {
                 return a.clone();
             }
-            let mut line = strip_injected_flags(a);
-            line.push_str(" --name ");
-            line.push_str(&shell_quote(name));
+            // The fullscreen renderer takes scrolling and selection away from
+            // the terminal emulator, which is what made the TUI feel stuck.
+            let mut line = strip_injected_flags(a).replace("env CLAUDE_CODE_NO_FLICKER=1 ", "");
+            if let Some(name) = name {
+                line.push_str(" --name ");
+                line.push_str(&shell_quote(name));
+            }
             if !session_id.is_empty() {
                 line.push_str(if resume { " --resume " } else { " --session-id " });
                 line.push_str(session_id);
@@ -675,7 +691,56 @@ pub fn spawn_args_for(home: &Path, rec: &RunnerRecord, cwd: &str) -> Vec<String>
         return rec.args.clone();
     }
     let resume = claude_session_exists(home, cwd, &rec.session_id);
-    build_spawn_args(&rec.args, &rec.name, &rec.session_id, resume)
+    build_spawn_args(&rec.args, spawn_name(rec), &rec.session_id, resume)
+}
+
+/// A machine-written placeholder is not worth pinning: `--name` writes a
+/// custom title, and that would stop Claude from titling the session itself.
+fn spawn_name(rec: &RunnerRecord) -> Option<&str> {
+    (!rec.name_auto).then_some(rec.name.as_str())
+}
+
+pub struct ChatOptions<'a> {
+    pub model: Option<&'a str>,
+    pub permission_mode: &'a str,
+}
+
+/// Command line for the native chat: the same preset line, with the
+/// interactive invocation swapped for headless stream-json.
+pub fn chat_args_for(home: &Path, rec: &RunnerRecord, cwd: &str, opts: &ChatOptions) -> Vec<String> {
+    let resume = claude_session_exists(home, cwd, &rec.session_id);
+    rec.args
+        .iter()
+        .map(|a| {
+            let Some(i) = a.find(CLAUDE_NEEDLE) else {
+                return a.clone();
+            };
+            let mut line = a[..i].replace("env CLAUDE_CODE_NO_FLICKER=1 ", "");
+            line.push_str(
+                "claude -p --input-format stream-json --output-format stream-json --verbose \
+                 --include-partial-messages --permission-prompt-tool stdio",
+            );
+            let mode = match opts.permission_mode {
+                "default" | "acceptEdits" | "plan" | "bypassPermissions" => opts.permission_mode,
+                _ => "default",
+            };
+            line.push_str(" --permission-mode ");
+            line.push_str(mode);
+            if let Some(model) = opts.model.filter(|m| !m.is_empty() && *m != "default") {
+                line.push_str(" --model ");
+                line.push_str(&shell_quote(model));
+            }
+            if let Some(name) = spawn_name(rec) {
+                line.push_str(" --name ");
+                line.push_str(&shell_quote(name));
+            }
+            if !rec.session_id.is_empty() {
+                line.push_str(if resume { " --resume " } else { " --session-id " });
+                line.push_str(&rec.session_id);
+            }
+            line
+        })
+        .collect()
 }
 
 /// without persisting or spawning. Caller is responsible for upsert + PTY
@@ -720,6 +785,8 @@ pub fn build_runner_record(
         created_at,
         last_active: created_at,
         session_id,
+        mode: default_mode(),
+        name_auto: false,
     }
 }
 
@@ -799,19 +866,20 @@ pub fn dedupe_folders(folders: Vec<String>) -> Vec<String> {
 mod tests {
     use super::*;
 
-    const CLAUDE_LINE: &str = "exec env CLAUDE_CODE_NO_FLICKER=1 claude --dangerously-skip-permissions";
+    const CLAUDE_LINE: &str = "exec claude --dangerously-skip-permissions";
+    const LEGACY_LINE: &str = "exec env CLAUDE_CODE_NO_FLICKER=1 claude --dangerously-skip-permissions";
 
     #[test]
     fn first_spawn_pins_the_session_id() {
         let args = vec!["-i".into(), "-l".into(), "-c".into(), CLAUDE_LINE.into()];
-        let out = build_spawn_args(&args, "main", "abc-123", false);
+        let out = build_spawn_args(&args, Some("main"), "abc-123", false);
         assert_eq!(out[3], format!("{CLAUDE_LINE} --name 'main' --session-id abc-123"));
     }
 
     #[test]
     fn later_spawns_resume_that_session() {
         let args = vec!["-c".into(), CLAUDE_LINE.into()];
-        let out = build_spawn_args(&args, "main", "abc-123", true);
+        let out = build_spawn_args(&args, Some("main"), "abc-123", true);
         assert_eq!(out[1], format!("{CLAUDE_LINE} --name 'main' --resume abc-123"));
     }
 
@@ -820,16 +888,43 @@ mod tests {
     #[test]
     fn legacy_injected_name_is_stripped_not_stacked() {
         let legacy = format!("{CLAUDE_LINE} --name 'old'");
-        let out = build_spawn_args(&[legacy], "novo", "s1", false);
+        let out = build_spawn_args(&[legacy], Some("novo"), "s1", false);
         assert_eq!(out[0], format!("{CLAUDE_LINE} --name 'novo' --session-id s1"));
-        let twice = build_spawn_args(&out, "novo", "s1", false);
+        let twice = build_spawn_args(&out, Some("novo"), "s1", false);
         assert_eq!(twice, out);
+    }
+
+    #[test]
+    fn stored_no_flicker_prefix_is_dropped_at_spawn() {
+        let out = build_spawn_args(&[LEGACY_LINE.to_string()], None, "s1", true);
+        assert_eq!(out[0], format!("{CLAUDE_LINE} --resume s1"));
+    }
+
+    #[test]
+    fn chat_swaps_the_tui_for_stream_json() {
+        let mut rec = build_runner_record(
+            "r".into(),
+            "p".into(),
+            "agent".into(),
+            "Nova sessão".into(),
+            Some("/bin/zsh".into()),
+            Some(vec!["-c".into(), LEGACY_LINE.into()]),
+            None,
+            0,
+        );
+        rec.name_auto = true;
+        rec.session_id = "s1".into();
+        let opts = ChatOptions { model: Some("opus"), permission_mode: "plan" };
+        let out = chat_args_for(Path::new("/nonexistent"), &rec, "/w", &opts);
+        assert!(out[1].starts_with("exec claude -p --input-format stream-json"));
+        assert!(out[1].ends_with("--permission-mode plan --model 'opus' --session-id s1"));
+        assert!(!out[1].contains("--name"));
     }
 
     #[test]
     fn non_claude_commands_pass_through() {
         let args = vec!["-i".into(), "-l".into(), "-c".into(), "exec pnpm dev".into()];
-        assert_eq!(build_spawn_args(&args, "dev", "s1", true), args);
+        assert_eq!(build_spawn_args(&args, Some("dev"), "s1", true), args);
         assert!(!is_claude_command(&args));
     }
 

@@ -1,7 +1,16 @@
 import { createEffect, createSignal, Show, type JSX } from "solid-js";
 
+const [requested, setRequested] = createSignal<string | null>(null);
+
+/** Puts the InlineEdit mounted with this `editKey` into edit mode — how a
+ *  menu item or a shortcut starts a rename without a double-click. */
+export function startInlineEdit(key: string): void {
+  setRequested(key);
+}
+
 interface Props {
   value: string;
+  editKey?: string;
   /** When true, mount in edit mode immediately and select the contents. */
   autoEdit?: boolean;
   /** Called after the user accepts (Enter or blur). Empty string clears any override. */
@@ -24,6 +33,14 @@ export default function InlineEdit(props: Props) {
 
   createEffect(() => {
     if (props.autoEdit) {
+      setDraft(props.value);
+      setEditing(true);
+    }
+  });
+
+  createEffect(() => {
+    if (props.editKey && requested() === props.editKey) {
+      setRequested(null);
       setDraft(props.value);
       setEditing(true);
     }
@@ -67,7 +84,7 @@ export default function InlineEdit(props: Props) {
         ref={(el) => (inputRef = el)}
         class={
           props.inputClass ??
-          "w-full min-w-0 rounded border border-line-strong bg-sunken px-1 py-0 text-sm text-ink outline-none focus:border-line-strong"
+          "w-full min-w-0 rounded border border-accent bg-raised px-1 py-0 text-[length:inherit] font-[inherit] text-ink outline-none"
         }
         value={draft()}
         onInput={(e) => setDraft(e.currentTarget.value)}

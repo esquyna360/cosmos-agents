@@ -1,61 +1,62 @@
+import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import {
-  createMemo,
-  createSignal,
-  For,
-  onCleanup,
-  onMount,
-  Show,
-} from "solid-js";
-import {
-  Bot,
   ChevronRight,
   Globe,
-  GripVertical,
+  MessageSquare,
+  Moon,
+  PanelLeft,
+  Pencil,
   Plus,
   Power,
+  RotateCcw,
   Search,
   Settings2,
-  TerminalSquare,
+  SquareTerminal,
+  Sun,
   Trash2,
 } from "lucide-solid";
 
 import {
   deleteProject,
-  focusProject,
+  deleteRunner,
   focusedProjectId,
+  focusedRunner,
+  focusProject,
   focusRunner,
   isMasterProject,
   moveProject,
   moveRunner,
-  renameRunner,
+  newSession,
+  newTerminal,
   projectsStore,
+  restartRunner,
+  setRunnerMode,
   sleepProject,
+  stopRunner,
   updateProject,
   type ProjectUI,
   type RunnerUI,
 } from "../stores/projects";
+import { renameSession } from "../stores/chat";
 import { openCreator } from "../stores/creator";
 import {
   setSettingsOpen,
   setSidebarWidthPx,
   sidebarWidthPx,
+  toggleSidebar,
 } from "../stores/layout";
-import { activeSlot, slotsFor } from "../stores/panes";
-import { colorForPath } from "../lib/colorHash";
-import InlineEdit from "./InlineEdit";
+import { openJump } from "../stores/jump";
+import { cycleTheme, themeSpec } from "../stores/theme";
 import { webInfo, type WebInfo } from "../lib/remote";
-
-function basename(p: string): string {
-  const t = p.replace(/\/+$/, "");
-  const i = t.lastIndexOf("/");
-  return i >= 0 ? t.slice(i + 1) : t;
-}
+import { relativeTime } from "../lib/time";
+import InlineEdit, { startInlineEdit } from "./InlineEdit";
+import StatusGlyph, { glyphFor } from "../ui/StatusGlyph";
+import { openMenu, type MenuItem } from "../ui/Menu";
 
 /* ------------------------------ drag & drop ------------------------------
    HTML5 DnD only reveals its payload on drop, but rows need to know *during*
-   the drag whether they are a legal target — a runner must not land between
-   projects, and a runner from another project must not land here. So the drag
-   subject lives in a module signal instead of the DataTransfer. */
+   the drag whether they are a legal target, so the subject lives in a signal
+   instead of the DataTransfer. */
 
 type Drag = { kind: "project" | "runner"; id: string; projectId: string };
 
@@ -67,32 +68,12 @@ function endDrag() {
   setDropBefore(null);
 }
 
-/// A draggable ancestor swallows text selection inside an input, so renaming
-/// in place has to veto the drag.
 function isTextField(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && target.tagName === "INPUT";
 }
 
 export default function Sidebar() {
-  const [query, setQuery] = createSignal("");
-  const [collapsed, setCollapsed] = createSignal<Record<string, boolean>>(
-    readCollapsed(),
-  );
-
-  const matches = createMemo(() => {
-    const q = query().trim().toLowerCase();
-    if (!q) return projectsStore.list;
-    return projectsStore.list.filter(
-      (p) =>
-        p.name.toLowerCase().includes(q) ||
-        p.folders.some((f) => f.toLowerCase().includes(q)) ||
-        p.runners.some((r) => r.name.toLowerCase().includes(q)),
-    );
-  });
-
-  // Reordering a filtered list would persist an order for rows the user can't
-  // see, so dragging is only offered on the full list.
-  const reorderable = () => query().trim() === "";
+  const [collapsed, setCollapsed] = createSignal<Record<string, boolean>>(readCollapsed());
 
   function toggle(id: string) {
     const next = { ...collapsed(), [id]: !collapsed()[id] };
@@ -100,112 +81,132 @@ export default function Sidebar() {
     writeCollapsed(next);
   }
 
-  const liveTotal = () =>
-    projectsStore.list.reduce(
-      (n, p) => n + p.runners.filter((r) => r.live).length,
-      0,
+  /** Whatever is blocked on you or finished behind your back, across every
+   *  project. This is the list that makes running many agents workable. */
+  const attention = createMemo(() => {
+    const out: { project: ProjectUI; runner: RunnerUI }[] = [];
+    const current = focusedRunner()?.id;
+    for (const project of projectsStore.list)
+      for (const runner of project.runners) {
+        if (runner.id === current) continue;
+        if (runner.status === "awaiting_input" || runner.status === "error" || runner.unread)
+          out.push({ project, runner });
+      }
+    return out.sort(
+      (a, b) =>
+        Number(b.runner.status === "awaiting_input") -
+        Number(a.runner.status === "awaiting_input"),
     );
+  });
 
   return (
     <aside
       class="relative flex h-full shrink-0 flex-col border-r border-line bg-panel"
       style={{ width: `${sidebarWidthPx()}px` }}
     >
-      <div class="flex items-center gap-1.5 px-2.5 pb-1.5 pt-2.5">
-        <div class="relative min-w-0 flex-1">
-          <Search
-            size={11}
-            class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-faint"
-          />
-          <input
-            class="w-full rounded-cx border border-line bg-fill-1 py-1.5 pl-6 pr-2 text-[11.5px] text-ink outline-none transition placeholder:text-faint focus:border-accent focus:bg-fill-2"
-            placeholder="filtrar"
-            value={query()}
-            onInput={(e) => setQuery(e.currentTarget.value)}
-          />
-        </div>
+      <div
+        data-tauri-drag-region="deep"
+        class="flex h-[var(--titlebar-h)] shrink-0 items-center justify-end pr-2"
+      >
         <button
-          class="flex h-[27px] w-[27px] shrink-0 items-center justify-center rounded-cx border border-line text-dim transition hover:border-line-strong hover:bg-fill-2 hover:text-ink"
-          onClick={() => openCreator({ mode: "project" })}
-          title="novo projeto (⌘T)"
+          data-tauri-drag-region="false"
+          class="cx-icon-btn"
+          onClick={toggleSidebar}
+          title="Ocultar barra lateral (⌘B)"
         >
-          <Plus size={13} />
+          <PanelLeft size={14} />
         </button>
       </div>
 
-      <div class="flex items-baseline justify-between px-3 pb-1 pt-1.5">
-        <span class="text-[9.5px] font-semibold uppercase tracking-[0.16em] text-faint">
-          projetos
-        </span>
-        <Show when={liveTotal() > 0}>
-          <span class="text-[9.5px] tabular-nums text-faint">
-            {liveTotal()} ativo{liveTotal() === 1 ? "" : "s"}
-          </span>
+      <div class="px-2.5 pb-2">
+        <button
+          class="flex w-full items-center gap-2 rounded-cx border border-line bg-fill-1 px-2.5 py-[7px] text-left text-[12.5px] text-faint transition hover:border-line-strong hover:text-dim"
+          onClick={openJump}
+        >
+          <Search size={13} />
+          <span class="flex-1">Ir para…</span>
+          <kbd class="cx-kbd">⌘K</kbd>
+        </button>
+      </div>
+
+      <div class="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3">
+        <Show when={attention().length > 0}>
+          <SectionLabel>Precisa de você</SectionLabel>
+          <ul class="mb-3 space-y-px">
+            <For each={attention()}>
+              {(a) => <SessionRow project={a.project} runner={a.runner} showProject />}
+            </For>
+          </ul>
+        </Show>
+
+        <div class="flex items-center justify-between pr-1">
+          <SectionLabel>Projetos</SectionLabel>
+          <button
+            class="cx-icon-btn h-5 w-5"
+            onClick={() => openCreator({ mode: "project" })}
+            title="Novo projeto (⌘T)"
+          >
+            <Plus size={13} />
+          </button>
+        </div>
+
+        <ul
+          onDragOver={(e) => {
+            if (drag()?.kind === "project" && e.target === e.currentTarget) {
+              e.preventDefault();
+              setDropBefore(null);
+            }
+          }}
+          onDrop={(e) => {
+            const d = drag();
+            if (d?.kind === "project" && e.target === e.currentTarget) {
+              e.preventDefault();
+              moveProject(d.id, null);
+            }
+            endDrag();
+          }}
+        >
+          <For each={projectsStore.list}>
+            {(p) => (
+              <ProjectGroup
+                project={p}
+                collapsed={!!collapsed()[p.id]}
+                onToggle={() => toggle(p.id)}
+              />
+            )}
+          </For>
+        </ul>
+
+        <Show when={projectsStore.list.length === 0}>
+          <p class="px-2 py-4 text-[12px] leading-relaxed text-faint">
+            Um projeto é uma ou mais pastas onde seus agentes trabalham.
+          </p>
         </Show>
       </div>
 
-      <ul
-        class="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-1.5 pb-2"
-        onDragOver={(e) => {
-          // Dropping on the empty space past the last row appends.
-          if (drag()?.kind === "project" && e.target === e.currentTarget) {
-            e.preventDefault();
-            setDropBefore(null);
-          }
-        }}
-        onDrop={(e) => {
-          const d = drag();
-          if (d?.kind === "project" && e.target === e.currentTarget) {
-            e.preventDefault();
-            moveProject(d.id, null);
-          }
-          endDrag();
-        }}
-      >
-        <For each={matches()}>
-          {(p) => (
-            <ProjectRow
-              project={p}
-              collapsed={!!collapsed()[p.id]}
-              reorderable={reorderable()}
-              onToggle={() => toggle(p.id)}
-            />
-          )}
-        </For>
-        <Show when={matches().length === 0}>
-          <li class="px-2 py-6 text-center text-[11px] text-faint">
-            nada com “{query()}”
-          </li>
-        </Show>
-      </ul>
-
-      <RemoteLink />
+      <Footer />
       <ResizeHandle />
     </aside>
   );
 }
 
+function SectionLabel(props: { children: string }) {
+  return (
+    <div class="px-2 pb-1 pt-1.5 text-[11px] font-medium text-faint">{props.children}</div>
+  );
+}
+
 /* -------------------------------- project -------------------------------- */
 
-function ProjectRow(props: {
+function ProjectGroup(props: {
   project: ProjectUI;
   collapsed: boolean;
-  reorderable: boolean;
   onToggle: () => void;
 }) {
   const p = () => props.project;
-  const isFocused = () => focusedProjectId() === p().id;
-  const folderHint = () => {
-    if (p().folders.length > 1) return `${p().folders.length} pastas`;
-    const folder = basename(p().folders[0] ?? p().cwd);
-    return p().name !== folder ? folder : null;
-  };
   const liveCount = () => p().runners.filter((r) => r.live).length;
-  const isDropTarget = () =>
-    drag()?.kind === "project" && dropBefore() === p().id;
+  const isDropTarget = () => drag()?.kind === "project" && dropBefore() === p().id;
 
-  /* The delete confirm lives in the row itself. It used to be four steps deep
-     inside the edit modal, which is the same as not existing. */
   const [confirming, setConfirming] = createSignal(false);
   const [typed, setTyped] = createSignal("");
   const [deleteError, setDeleteError] = createSignal<string | null>(null);
@@ -214,12 +215,6 @@ function ProjectRow(props: {
   /// asks for its name first — that is the case where a misclick costs work.
   const needsTyping = () => liveCount() > 0;
   const armed = () => !needsTyping() || typed().trim() === p().name;
-
-  function openConfirm() {
-    setTyped("");
-    setDeleteError(null);
-    setConfirming(true);
-  }
 
   async function runDelete() {
     if (!armed() || deleting()) return;
@@ -233,13 +228,63 @@ function ProjectRow(props: {
     }
   }
 
+  function menu(): MenuItem[] {
+    return [
+      {
+        label: "Nova sessão",
+        icon: MessageSquare,
+        hint: "⌘N",
+        onSelect: () => void newSession(p().id),
+      },
+      {
+        label: "Novo terminal",
+        icon: SquareTerminal,
+        hint: "⌘⇧N",
+        onSelect: () => void newTerminal(p().id),
+      },
+      {
+        label: "Renomear",
+        icon: Pencil,
+        separatorBefore: true,
+        onSelect: () => startInlineEdit(`project:${p().id}`),
+      },
+      {
+        label: "Pastas e memória",
+        icon: Settings2,
+        onSelect: () => openCreator({ mode: "project", editingProjectId: p().id }),
+      },
+      {
+        label: "Parar tudo",
+        icon: Power,
+        disabled: liveCount() === 0,
+        onSelect: () => void sleepProject(p().id),
+      },
+      ...(isMasterProject(p())
+        ? []
+        : [
+            {
+              label: "Excluir projeto",
+              icon: Trash2,
+              danger: true,
+              separatorBefore: true,
+              onSelect: () => {
+                setTyped("");
+                setDeleteError(null);
+                setConfirming(true);
+              },
+            } satisfies MenuItem,
+          ]),
+    ];
+  }
+
   return (
     <li
+      class="mb-1"
       classList={{
         "cx-dragging": drag()?.kind === "project" && drag()?.id === p().id,
         "cx-drop-before": isDropTarget(),
       }}
-      draggable={props.reorderable}
+      draggable={true}
       onDragStart={(e) => {
         if (isTextField(e.target)) {
           e.preventDefault();
@@ -266,125 +311,61 @@ function ProjectRow(props: {
       }}
     >
       <div
-        class="group relative flex items-center gap-1 rounded-cx py-1.5 pl-1 pr-1.5 transition"
-        classList={{
-          "bg-fill-2": isFocused(),
-          "hover:bg-fill-1": !isFocused(),
-        }}
+        class="group flex h-[30px] items-center gap-1 rounded-cx pl-1 pr-1 transition hover:bg-fill-1"
+        onContextMenu={(e) => openMenu(e, menu())}
       >
-        {/* The grip is what carries the drag. Making the whole row draggable
-            would fight text selection and the inline rename. */}
-        <span
-          class={`flex h-4 w-3 shrink-0 items-center justify-center text-faint transition ${
-            props.reorderable
-              ? "cursor-grab opacity-0 group-hover:opacity-100 active:cursor-grabbing"
-              : "invisible"
-          }`}
-          title="arraste para reordenar"
-        >
-          <GripVertical size={11} />
-        </span>
-
         <button
-          class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-faint transition hover:text-ink"
+          class="flex h-5 w-5 shrink-0 items-center justify-center rounded text-faint transition hover:text-ink"
           onClick={props.onToggle}
-          title={props.collapsed ? "expandir" : "recolher"}
+          title={props.collapsed ? "Expandir" : "Recolher"}
         >
           <ChevronRight
-            size={11}
+            size={12}
             class="transition-transform"
             style={{ transform: props.collapsed ? "none" : "rotate(90deg)" }}
           />
         </button>
-
         <button
-          class="flex min-w-0 flex-1 items-center gap-2 text-left"
-          onClick={() => focusProject(p().id)}
-          title={[...p().folders, "", "duplo clique renomeia"].join("\n")}
-        >
-          <span
-            class="h-1.5 w-1.5 shrink-0 rounded-full transition"
-            style={{
-              "background-color": colorForPath(p().cwd),
-              opacity: liveCount() > 0 ? 1 : 0.35,
-              "box-shadow":
-                liveCount() > 0 ? `0 0 7px ${colorForPath(p().cwd)}` : "none",
-            }}
-          />
-          <span class="min-w-0 flex-1 truncate">
-            <InlineEdit
-              value={p().name}
-              onCommit={(next) => {
-                const trimmed = next.trim();
-                if (!trimmed || trimmed === p().name) return;
-                updateProject(p().id, trimmed, p().folders, p().memory).catch(
-                  console.error,
-                );
-              }}
-            >
-              {(name) => (
-                <span class="flex min-w-0 flex-col">
-                  <span
-                    class="truncate text-[12.5px] font-semibold leading-tight"
-                    classList={{
-                      "text-ink": isFocused() || liveCount() > 0,
-                      "text-dim": !isFocused() && liveCount() === 0,
-                    }}
-                  >
-                    {name}
-                  </span>
-                  <Show when={folderHint()}>
-                    <span class="truncate text-[10px] font-normal leading-tight text-faint">
-                      {folderHint()}
-                    </span>
-                  </Show>
-                </span>
-              )}
-            </InlineEdit>
-          </span>
-        </button>
-
-        <button
-          class="hidden shrink-0 rounded p-1 text-faint transition hover:bg-fill-2 hover:text-ink group-hover:inline-flex"
-          onClick={(e) => {
-            e.stopPropagation();
-            openCreator({ mode: "project", editingProjectId: p().id });
+          class="min-w-0 flex-1 truncate text-left text-[12.5px] font-semibold"
+          classList={{
+            "text-ink": focusedProjectId() === p().id,
+            "text-dim": focusedProjectId() !== p().id,
           }}
-          title="editar projeto"
+          onClick={() => {
+            focusProject(p().id);
+            if (props.collapsed) props.onToggle();
+          }}
+          title={p().folders.join("\n")}
         >
-          <Settings2 size={11} />
+          <InlineEdit
+            editKey={`project:${p().id}`}
+            value={p().name}
+            onCommit={(next) => {
+              const trimmed = next.trim();
+              if (!trimmed || trimmed === p().name) return;
+              updateProject(p().id, trimmed, p().folders, p().memory).catch(console.error);
+            }}
+          >
+            {(name) => <span class="truncate">{name}</span>}
+          </InlineEdit>
         </button>
-        <Show when={!isMasterProject(p())}>
-          <button
-            class="hidden shrink-0 rounded p-1 text-faint transition hover:bg-alert/15 hover:text-alert group-hover:inline-flex"
-            classList={{ "!inline-flex text-alert": confirming() }}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (confirming()) setConfirming(false);
-              else openConfirm();
-            }}
-            title="excluir projeto"
-          >
-            <Trash2 size={11} />
-          </button>
+        <Show when={props.collapsed && liveCount() > 0}>
+          <span class="shrink-0 pr-1 text-[11px] tabular-nums text-faint group-hover:hidden">
+            {liveCount()}
+          </span>
         </Show>
-        <Show when={liveCount() > 0}>
-          <button
-            class="hidden shrink-0 rounded p-1 text-faint transition hover:bg-fill-2 hover:text-ink group-hover:inline-flex"
-            onClick={(e) => {
-              e.stopPropagation();
-              sleepProject(p().id).catch(console.error);
-            }}
-            title="parar os runners — nada é apagado"
-          >
-            <Power size={11} />
-          </button>
-        </Show>
+        <button
+          class="cx-icon-btn hidden h-5 w-5 group-hover:flex"
+          onClick={() => void newSession(p().id)}
+          title="Nova sessão neste projeto"
+        >
+          <Plus size={13} />
+        </button>
       </div>
 
       <Show when={confirming()}>
         <div
-          class="mb-1 ml-[19px] mt-1 rounded-cx border border-alert/30 bg-alert/[0.07] px-2 py-1.5"
+          class="mx-1 mb-1 mt-1 rounded-cx border border-alert/30 bg-alert-soft px-2.5 py-2"
           onKeyDown={(e) => {
             if (e.key === "Escape") {
               e.stopPropagation();
@@ -392,21 +373,20 @@ function ProjectRow(props: {
             }
           }}
         >
-          <p class="text-[10.5px] leading-snug text-dim">
-            excluir <b class="text-ink">{p().name}</b>?
+          <p class="text-[12px] leading-snug text-dim">
+            Excluir <b class="text-ink">{p().name}</b>
             <Show when={p().runners.length > 0}>
               {" "}
-              vão junto {p().runners.length} runner
-              {p().runners.length === 1 ? "" : "s"} e suas sessões.
-            </Show>{" "}
-            as pastas de trabalho no disco ficam.
+              e {p().runners.length === 1 ? "sua sessão" : `suas ${p().runners.length} sessões`}
+            </Show>
+            ? As pastas no disco ficam.
           </p>
           <Show when={needsTyping()}>
-            <p class="mt-1 text-[10px] leading-snug text-alert">
-              {liveCount()} rodando agora — digite o nome pra liberar
+            <p class="mt-1.5 text-[11.5px] leading-snug text-alert">
+              {liveCount()} rodando agora. Digite o nome do projeto para liberar.
             </p>
             <input
-              class="mt-1 w-full rounded border border-line bg-sunken px-1.5 py-1 text-[11px] text-ink outline-none transition focus:border-alert/50"
+              class="mt-1.5 w-full rounded-md border border-line bg-raised px-2 py-1 text-[12px] text-ink outline-none transition focus:border-alert/60"
               placeholder={p().name}
               value={typed()}
               ref={(el) => queueMicrotask(() => el.focus())}
@@ -420,85 +400,105 @@ function ProjectRow(props: {
             />
           </Show>
           <Show when={deleteError()}>
-            <p class="mt-1 text-[10px] leading-snug text-alert">{deleteError()}</p>
+            <p class="mt-1 text-[11.5px] leading-snug text-alert">{deleteError()}</p>
           </Show>
-          <div class="mt-1.5 flex items-center gap-1.5">
+          <div class="mt-2 flex items-center gap-1.5">
             <button
-              class="rounded border border-alert/40 px-2 py-0.5 text-[10.5px] font-medium text-alert transition hover:bg-alert/15 disabled:cursor-not-allowed disabled:opacity-35"
+              class="rounded-md border border-alert/40 px-2 py-1 text-[12px] font-medium text-alert transition hover:bg-alert-soft disabled:cursor-not-allowed disabled:opacity-35"
               disabled={!armed() || deleting()}
-              onClick={(e) => {
-                e.stopPropagation();
-                void runDelete();
-              }}
+              onClick={() => void runDelete()}
             >
-              {deleting() ? "excluindo…" : "excluir"}
+              {deleting() ? "Excluindo…" : "Excluir projeto"}
             </button>
             <button
-              class="rounded px-2 py-0.5 text-[10.5px] text-faint transition hover:bg-fill-2 hover:text-ink"
-              onClick={(e) => {
-                e.stopPropagation();
-                setConfirming(false);
-              }}
+              class="rounded-md px-2 py-1 text-[12px] text-dim transition hover:bg-fill-2 hover:text-ink"
+              onClick={() => setConfirming(false)}
             >
-              cancelar
+              Cancelar
             </button>
           </div>
         </div>
       </Show>
 
-      <Show when={!props.collapsed && p().runners.length > 0}>
-        <ul class="mb-1 ml-[19px] mt-0.5 border-l border-line pl-1">
+      <Show when={!props.collapsed}>
+        <ul class="space-y-px">
           <For each={p().runners}>
-            {(r) => (
-              <RunnerRow
-                project={p()}
-                runner={r}
-                reorderable={props.reorderable}
-              />
-            )}
+            {(r) => <SessionRow project={p()} runner={r} />}
           </For>
+          <Show when={p().runners.length === 0}>
+            <li>
+              <button
+                class="ml-6 rounded-md px-2 py-1 text-[12px] text-faint transition hover:bg-fill-1 hover:text-dim"
+                onClick={() => void newSession(p().id)}
+              >
+                Começar uma sessão
+              </button>
+            </li>
+          </Show>
         </ul>
       </Show>
     </li>
   );
 }
 
-/* --------------------------------- runner -------------------------------- */
+/* --------------------------------- session ------------------------------- */
 
-function RunnerRow(props: {
+function SessionRow(props: {
   project: ProjectUI;
   runner: RunnerUI;
-  reorderable: boolean;
+  /** Rows in "Precisa de você" are out of their group, so they name it. */
+  showProject?: boolean;
 }) {
   const r = () => props.runner;
-  const inProject = () => focusedProjectId() === props.project.id;
-  const onScreen = () =>
-    inProject() && slotsFor(props.project.id).includes(r().id);
-  /** The runner the composer and ⌘W act on. This is *the* selection, and the
-   *  reason it gets the accent rail: nothing else in the sidebar uses accent,
-   *  so it can never be confused with the project row's fill. */
-  const selected = () =>
-    inProject() && slotsFor(props.project.id)[activeSlot()] === r().id;
+  const selected = () => focusedRunner()?.id === r().id;
+  const glyph = () => glyphFor(r());
+  const editKey = () => `runner:${r().id}${props.showProject ? ":attn" : ""}`;
   const isDropTarget = () =>
+    !props.showProject &&
     drag()?.kind === "runner" &&
     drag()?.projectId === props.project.id &&
     dropBefore() === r().id;
 
-  const statusLabel = () => {
-    if (!r().live) return "parado";
-    switch (r().status) {
-      case "streaming":
-        return "escrevendo";
-      case "tool_running":
-        return "rodando";
-      case "awaiting_input":
-        return "esperando você";
-      case "error":
-        return "erro";
-      default:
-        return "ocioso";
-    }
+  const secondLine = () => {
+    if (props.showProject) return props.project.name;
+    if (glyph() === "awaiting") return "Esperando sua resposta";
+    if (glyph() === "working") return r().activity || "Trabalhando";
+    return "";
   };
+
+  function menu(): MenuItem[] {
+    const isAgent = r().kind === "agent";
+    return [
+      { label: "Renomear", icon: Pencil, onSelect: () => startInlineEdit(editKey()) },
+      ...(isAgent && r().sessionId
+        ? [
+            {
+              label: r().mode === "chat" ? "Abrir como terminal" : "Abrir como chat",
+              icon: r().mode === "chat" ? SquareTerminal : MessageSquare,
+              onSelect: () => void setRunnerMode(r().id, r().mode === "chat" ? "tty" : "chat"),
+            } satisfies MenuItem,
+          ]
+        : []),
+      {
+        label: "Reiniciar",
+        icon: RotateCcw,
+        onSelect: () => void restartRunner(r().id),
+      },
+      {
+        label: "Parar",
+        icon: Power,
+        disabled: !r().live,
+        onSelect: () => void stopRunner(r().id),
+      },
+      {
+        label: isAgent ? "Excluir sessão" : "Excluir terminal",
+        icon: Trash2,
+        danger: true,
+        separatorBefore: true,
+        onSelect: () => void deleteRunner(r().id),
+      },
+    ];
+  }
 
   return (
     <li
@@ -506,7 +506,7 @@ function RunnerRow(props: {
         "cx-dragging": drag()?.kind === "runner" && drag()?.id === r().id,
         "cx-drop-before": isDropTarget(),
       }}
-      draggable={props.reorderable}
+      draggable={!props.showProject}
       onDragStart={(e) => {
         e.stopPropagation();
         if (isTextField(e.target)) {
@@ -520,114 +520,85 @@ function RunnerRow(props: {
       onDragEnd={endDrag}
       onDragOver={(e) => {
         const d = drag();
-        // Runners only reorder within their own project.
-        if (d?.kind !== "runner" || d.projectId !== props.project.id) return;
+        if (props.showProject || d?.kind !== "runner" || d.projectId !== props.project.id) return;
         e.preventDefault();
         e.stopPropagation();
         setDropBefore(r().id);
       }}
       onDrop={(e) => {
         const d = drag();
-        if (d?.kind !== "runner" || d.projectId !== props.project.id) return;
+        if (props.showProject || d?.kind !== "runner" || d.projectId !== props.project.id) return;
         e.preventDefault();
         e.stopPropagation();
         moveRunner(props.project.id, d.id, r().id);
         endDrag();
       }}
     >
-      <div
-        class="group relative flex items-center rounded-cx transition"
+      <button
+        class="group flex w-full items-start gap-2 rounded-cx py-[6px] pl-[9px] pr-2 text-left transition"
         classList={{
-          "bg-accent-soft": selected(),
+          "bg-fill-3": selected(),
           "hover:bg-fill-1": !selected(),
         }}
+        onClick={() => focusRunner(props.project.id, r().id)}
+        onContextMenu={(e) => openMenu(e, menu())}
       >
-        <Show when={selected()}>
-          <span class="absolute -left-[5px] top-1/2 h-[16px] w-[3px] -translate-y-1/2 rounded-full bg-accent" />
-        </Show>
-
-        <span
-          class={`flex h-4 w-3 shrink-0 items-center justify-center text-faint transition ${
-            props.reorderable
-              ? "cursor-grab opacity-0 group-hover:opacity-100 active:cursor-grabbing"
-              : "invisible"
-          }`}
-          title="arraste para reordenar"
-        >
-          <GripVertical size={10} />
+        <span class="flex h-[18px] w-[14px] shrink-0 items-center justify-center">
+          <StatusGlyph glyph={glyph()} />
         </span>
-
-        <button
-          class="flex min-w-0 flex-1 items-center gap-1.5 py-1 pr-1.5 text-left transition"
-          classList={{ "text-ink": selected(), "text-dim group-hover:text-ink": !selected() }}
-          onClick={() => focusRunner(props.project.id, r().id)}
-          title={`${r().kind} · ${r().name} — ${statusLabel()}${
-            r().live ? "" : ". clique para retomar a sessão"
-          }\nduplo clique renomeia`}
-        >
-          <span
-            class="shrink-0"
-            classList={{ "text-accent": selected(), "opacity-60": !selected() }}
-          >
-            {r().kind === "shell" ? (
-              <TerminalSquare size={11} />
-            ) : (
-              <Bot size={11} />
-            )}
-          </span>
-
-          <span
-            class="h-1 w-1 shrink-0 rounded-full"
-            classList={{
-              "bg-live": r().live && r().status === "idle",
-              "bg-busy cx-pulse":
-                r().live &&
-                (r().status === "streaming" || r().status === "tool_running"),
-              "bg-alert cx-pulse": r().status === "awaiting_input",
-              "bg-alert": r().status === "error",
-              "bg-fill-4": !r().live || r().status === "exited",
-            }}
-          />
-
-          <span class="min-w-0 flex-1 truncate">
-            <InlineEdit
-              value={r().name}
-              inputClass="w-full min-w-0 rounded border border-accent bg-float px-1 py-0 text-[11.5px] text-ink outline-none"
-              onCommit={(next) => {
-                const trimmed = next.trim();
-                if (!trimmed || trimmed === r().name) return;
-                renameRunner(r().id, trimmed).catch(console.error);
+        <span class="min-w-0 flex-1">
+          <span class="flex items-baseline gap-2">
+            <span
+              class="min-w-0 flex-1 truncate text-[12.5px] leading-[18px]"
+              classList={{
+                "text-ink": selected() || r().live || r().unread,
+                "font-medium": r().unread || glyph() === "awaiting",
+                "text-dim": !selected() && !r().live && !r().unread,
               }}
             >
-              {(name) => (
-                <span
-                  class="block truncate text-[11.5px]"
-                  classList={{ "font-semibold": selected() }}
-                >
-                  {name}
-                </span>
-              )}
-            </InlineEdit>
+              <InlineEdit
+                editKey={editKey()}
+                value={r().name}
+                onCommit={(next) => {
+                  const trimmed = next.trim();
+                  if (!trimmed || trimmed === r().name) return;
+                  renameSession(r().id, trimmed).catch(console.error);
+                }}
+              >
+                {(name) => <span class="truncate">{name}</span>}
+              </InlineEdit>
+            </span>
+            <Show when={r().kind === "agent" && r().mode === "tty"}>
+              <span class="shrink-0 font-mono text-[10px] text-faint" title="Rodando como terminal">
+                tty
+              </span>
+            </Show>
+            <Show when={!secondLine() && r().kind === "agent"}>
+              <span class="shrink-0 text-[11px] tabular-nums text-faint">
+                {relativeTime(r().lastActive)}
+              </span>
+            </Show>
           </span>
-
-          {/* Visible in another pane, but not the one being typed into. */}
-          <Show when={onScreen() && !selected()}>
+          <Show when={secondLine()}>
             <span
-              class="h-1 w-1 shrink-0 rounded-full bg-fill-4"
-              title="visível em outro painel"
-            />
+              class="block truncate text-[11.5px] leading-[16px]"
+              classList={{
+                "text-busy": glyph() === "awaiting" && !props.showProject,
+                "text-faint": glyph() !== "awaiting" || props.showProject,
+              }}
+            >
+              {secondLine()}
+            </span>
           </Show>
-        </button>
-      </div>
+        </span>
+      </button>
     </li>
   );
 }
 
 /* --------------------------------- footer -------------------------------- */
 
-/// The quick-tunnel URL rotates on every reconnect, so the value of showing it
-/// is that one click puts the *current* one on the clipboard.
-function RemoteLink() {
+function Footer() {
   const [info, setInfo] = createSignal<WebInfo | null>(null);
   const [copied, setCopied] = createSignal(false);
 
@@ -642,53 +613,47 @@ function RemoteLink() {
   const online = () => Boolean(info()?.tunnel);
 
   return (
-    <div class="flex items-center gap-1 border-t border-line px-2 py-1.5">
+    <div class="flex items-center gap-0.5 border-t border-line px-2 py-1.5">
       <button
-        class="flex min-w-0 flex-1 items-center gap-2 rounded-cx px-1.5 py-1 text-left text-[11px] text-faint transition hover:bg-fill-1 hover:text-dim"
-        disabled={!link()}
-        title={link() ?? "web UI desligada"}
-        onClick={() => {
-          const url = link();
-          if (!url) return;
-          navigator.clipboard.writeText(url).then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1600);
-          });
-        }}
-      >
-        <Globe size={12} class={online() ? "text-live" : "text-faint"} />
-        <span class="min-w-0 flex-1 truncate">
-          {copied()
-            ? "link copiado"
-            : online()
-              ? "remoto ativo · copiar"
-              : link()
-                ? "só local · copiar"
-                : "web ui off"}
-        </span>
-      </button>
-      <button
-        class="shrink-0 rounded-cx p-1.5 text-faint transition hover:bg-fill-2 hover:text-ink"
+        class="cx-icon-btn"
         onClick={() => setSettingsOpen(true)}
-        title="configurações (⌘,)"
+        title="Configurações (⌘,)"
       >
-        <Settings2 size={12} />
+        <Settings2 size={14} />
       </button>
+      <button
+        class="cx-icon-btn"
+        onClick={cycleTheme}
+        title={themeSpec().mode === "dark" ? "Mudar para tema claro (⌘⇧T)" : "Mudar para tema escuro (⌘⇧T)"}
+      >
+        {themeSpec().mode === "dark" ? <Sun size={14} /> : <Moon size={14} />}
+      </button>
+      <Show when={link()}>
+        <button
+          class="ml-auto flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-[11.5px] text-faint transition hover:bg-fill-1 hover:text-dim"
+          title={link()!}
+          onClick={() => {
+            navigator.clipboard.writeText(link()!).then(() => {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1600);
+            });
+          }}
+        >
+          <Globe size={12} class={online() ? "text-live" : ""} />
+          <span class="truncate">
+            {copied() ? "Link copiado" : online() ? "Acesso remoto" : "Acesso local"}
+          </span>
+        </button>
+      </Show>
     </div>
   );
 }
 
 function ResizeHandle() {
-  let dragging = false;
   function onMouseDown(e: MouseEvent) {
-    dragging = true;
     e.preventDefault();
-    const move = (ev: MouseEvent) => {
-      if (!dragging) return;
-      setSidebarWidthPx(ev.clientX);
-    };
+    const move = (ev: MouseEvent) => setSidebarWidthPx(ev.clientX);
     const up = () => {
-      dragging = false;
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
     };
@@ -699,7 +664,6 @@ function ResizeHandle() {
     <div
       class="absolute right-0 top-0 h-full w-1.5 cursor-col-resize bg-transparent transition hover:bg-accent-soft"
       onMouseDown={onMouseDown}
-      title="arraste para redimensionar"
     />
   );
 }

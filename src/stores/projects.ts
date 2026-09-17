@@ -13,11 +13,14 @@ import {
   runnersDelete,
   runnersList,
   runnersResetSession,
+  runnersSetMode,
   runnersStop,
   runnersUpdate,
+  isClaudeRunner,
   type Project,
   type Runner,
   type RunnerKind,
+  type RunnerMode,
   type RunnerStatus,
 } from "../lib/projects";
 import {
@@ -28,6 +31,7 @@ import {
   runnersReorder,
   type AgentStatus,
 } from "../lib/ipc";
+import { agentKill } from "../lib/agent";
 import { activeSlot, forgetProject, revealRunner, slotsFor } from "./panes";
 import { fsClaudeMd, fsDetectStack, type StackInfo } from "../lib/fs";
 
@@ -35,6 +39,10 @@ import { fsClaudeMd, fsDetectStack, type StackInfo } from "../lib/fs";
 export interface RunnerUI extends Runner {
   live: boolean;
   status: RunnerStatus;
+  /// Finished a turn, or started waiting on you, while you were elsewhere.
+  unread: boolean;
+  /// One line on what it is doing right now ("Edit src/App.tsx"). Chat only.
+  activity: string;
 }
 
 /// Editor state that needs to survive view switches (since `<Show
@@ -95,7 +103,7 @@ const DEFAULT_AGENT_ARGS = [
   "-i",
   "-l",
   "-c",
-  "exec env CLAUDE_CODE_NO_FLICKER=1 claude --dangerously-skip-permissions",
+  "exec claude --dangerously-skip-permissions",
 ];
 const DEFAULT_SHELL_PROGRAM = "/bin/zsh";
 const DEFAULT_SHELL_ARGS = ["-i", "-l"];
@@ -219,7 +227,27 @@ export function focusRunner(projectId: string, runnerId: string): void {
   revealRunner(projectId, runnerId);
   const proj = state.list.find((p) => p.id === projectId);
   const runner = proj?.runners.find((r) => r.id === runnerId);
-  if (runner && !runner.live) restartRunner(runnerId).catch(console.error);
+  if (!runner) return;
+  if (runner.unread) patchRunner(runnerId, { unread: false });
+  // A chat shows its transcript without a process and starts one on the
+  // first message; only a terminal needs its PTY back to show anything.
+  if (!runner.live && !isChat(runner)) restartRunner(runnerId).catch(console.error);
+}
+
+export function isChat(r: { kind: RunnerKind; mode: RunnerMode }): boolean {
+  return r.kind === "agent" && r.mode === "chat";
+}
+
+export function findRunner(id: string): { project: ProjectUI; runner: RunnerUI } | undefined {
+  for (const project of state.list) {
+    const runner = project.runners.find((r) => r.id === id);
+    if (runner) return { project, runner };
+  }
+  return undefined;
+}
+
+export function patchRunner(id: string, patch: Partial<RunnerUI>): void {
+  setState("list", () => true, "runners", (r) => r.id === id, patch);
 }
 
 /**
@@ -324,6 +352,13 @@ export async function loadProjects(): Promise<void> {
     ptyLiveIds(),
   ]);
   const liveSet = new Set(live);
+  const prevUnread = new Map<string, boolean>();
+  const prevActivity = new Map<string, string>();
+  for (const p of state.list)
+    for (const r of p.runners) {
+      prevUnread.set(r.id, r.unread);
+      prevActivity.set(r.id, r.activity);
+    }
   const projectsById = new Map<string, ProjectUI>();
   for (const p of projects) {
     projectsById.set(p.id, toUI(p));
@@ -339,6 +374,8 @@ export async function loadProjects(): Promise<void> {
       // current state via the initial emit_status in supervisor.spawn so this
       // is just a placeholder.
       status: r.kind === "shell" ? (liveSet.has(r.id) ? "running" : "exited") : "idle",
+      unread: prevUnread.get(r.id) ?? false,
+      activity: prevActivity.get(r.id) ?? "",
     });
   }
   for (const p of projectsById.values()) {
@@ -458,6 +495,8 @@ function runnerToUI(r: Runner, live: boolean): RunnerUI {
     ...r,
     live,
     status: r.kind === "shell" ? (live ? "running" : "exited") : "idle",
+    unread: false,
+    activity: "",
   };
 }
 
@@ -484,31 +523,38 @@ export async function createProjectWithAgent(opts: {
   const project = await projectsCreate(opts.name, opts.folders, opts.memory ?? "");
   const ui = toUI(project);
 
-  const runnerName = opts.agentName?.trim() || "main";
+  // Claude opens as a chat that names itself and starts on the first
+  // message; any other CLI is a TUI and needs its PTY right away.
+  const asChat = !opts.agentArgs || isClaudeRunner({ kind: "agent", args: opts.agentArgs });
+  const typedName = opts.agentName?.trim();
   const runner = await runnersCreate({
     projectId: project.id,
     kind: "agent",
-    name: runnerName,
+    name: typedName || (asChat ? PLACEHOLDER_NAME : "main"),
     program: opts.agentProgram,
     args: opts.agentArgs,
+    mode: asChat ? "chat" : "tty",
+    nameAuto: asChat && !typedName,
   });
 
-  try {
-    await ptySpawn({
-      id: runner.id,
-      cwd: project.cwd,
-      program: runner.program,
-      args: runner.args,
-      cols: opts.cols ?? 100,
-      rows: opts.rows ?? 30,
-      projectId: project.id,
-      kind: "agent",
-    });
-  } catch (e) {
-    console.error("[cosmos] pty spawn failed during createProject", e);
+  if (!asChat) {
+    try {
+      await ptySpawn({
+        id: runner.id,
+        cwd: project.cwd,
+        program: runner.program,
+        args: runner.args,
+        cols: opts.cols ?? 100,
+        rows: opts.rows ?? 30,
+        projectId: project.id,
+        kind: "agent",
+      });
+    } catch (e) {
+      console.error("[cosmos] pty spawn failed during createProject", e);
+    }
   }
 
-  ui.runners.push(runnerToUI(runner, true));
+  ui.runners.push(runnerToUI(runner, !asChat));
   setState("list", (list) => [ui, ...list]);
   setFocusedProjectIdSignal(project.id);
   revealRunner(project.id, runner.id);
@@ -608,18 +654,66 @@ export async function updateProject(
   );
 }
 
-export async function renameRunner(id: string, name: string): Promise<void> {
+/** Cosmos-side rename only. `renameSession` in the chat store is the one
+ *  that also tells Claude. `auto` marks a name nobody typed. */
+export async function renameRunner(id: string, name: string, auto = false): Promise<void> {
   const trimmed = name.trim();
   if (!trimmed) return;
-  await runnersUpdate(id, trimmed);
-  setState(
-    "list",
-    () => true,
-    "runners",
-    (r) => r.id === id,
-    "name",
-    trimmed,
-  );
+  await runnersUpdate(id, trimmed, auto);
+  patchRunner(id, { name: trimmed, nameAuto: auto });
+}
+
+const PLACEHOLDER_NAME = "Nova sessão";
+
+/**
+ * A new Claude session, as a chat. Nothing is spawned: the process starts
+ * with the first message, and Claude names the session from it.
+ */
+export async function newSession(projectId: string): Promise<RunnerUI | null> {
+  const project = state.list.find((p) => p.id === projectId);
+  if (!project) return null;
+  const runner = await runnersCreate({
+    projectId,
+    kind: "agent",
+    name: PLACEHOLDER_NAME,
+    mode: "chat",
+    nameAuto: true,
+  });
+  const ui = runnerToUI(runner, false);
+  setState("list", (p) => p.id === projectId, "runners", (rs) => [...rs, ui]);
+  if (project.collapsed) toggleProjectCollapsed(projectId);
+  setFocusedProjectIdSignal(projectId);
+  revealRunner(projectId, runner.id);
+  return ui;
+}
+
+export async function newTerminal(projectId: string): Promise<RunnerUI> {
+  const project = state.list.find((p) => p.id === projectId);
+  const n = (project?.runners.filter((r) => r.kind === "shell").length ?? 0) + 1;
+  const ui = await createRunnerInProject(projectId, "shell", { name: `Terminal ${n}` });
+  consumePendingRename(ui.id);
+  return ui;
+}
+
+/**
+ * Chat and terminal are two views of one Claude session. Whatever process is
+ * running is stopped first — two writers on one transcript would fork it —
+ * and the other side picks the thread up with `--resume`.
+ */
+export async function setRunnerMode(id: string, mode: RunnerMode): Promise<void> {
+  const found = findRunner(id);
+  if (!found || found.runner.kind !== "agent" || found.runner.mode === mode) return;
+  await agentKill(id).catch(() => {});
+  await ptyKill(id).catch(() => {});
+  await runnersSetMode(id, mode);
+  patchRunner(id, { mode, live: false, status: "idle" as RunnerStatus, activity: "" });
+  if (mode === "tty") await restartRunner(id);
+}
+
+const resetHooks: ((id: string) => void)[] = [];
+/** Lets the chat store forget a conversation without this file importing it. */
+export function onRunnerReset(fn: (id: string) => void): void {
+  resetHooks.push(fn);
 }
 
 /**
@@ -649,10 +743,15 @@ export async function restartRunner(id: string): Promise<void> {
   const project = state.list.find((p) => p.runners.some((r) => r.id === id));
   const runner = project?.runners.find((r) => r.id === id);
   if (!project || !runner) return;
+  await agentKill(id).catch(() => {});
   try {
     await ptyKill(id);
   } catch {
     /* already dead */
+  }
+  if (isChat(runner)) {
+    patchRunner(id, { live: false, status: "idle" as RunnerStatus, activity: "" });
+    return;
   }
   setState(
     "list",
@@ -691,6 +790,7 @@ export async function resetRunnerSession(id: string): Promise<void> {
     console.error("[cosmos] runners_reset_session failed", e);
     return;
   }
+  for (const fn of resetHooks) fn(id);
   await loadProjects();
   await restartRunner(id);
 }
@@ -704,6 +804,7 @@ export async function deleteRunner(id: string): Promise<void> {
   } catch (e) {
     console.error("[cosmos] runners_delete failed", e);
   }
+  for (const fn of resetHooks) fn(id);
   setState(
     "list",
     (p) => p.id === project.id,

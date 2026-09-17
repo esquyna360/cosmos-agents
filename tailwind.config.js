@@ -20,6 +20,9 @@ export default {
         live: "var(--live)",
         busy: "var(--busy)",
         alert: "var(--alert)",
+        "busy-soft": "var(--busy-soft)",
+        "alert-soft": "var(--alert-soft)",
+        "add-soft": "var(--add-soft)",
         // Overlay scale. Components say `bg-fill-2` and stay correct in both
         // light and dark themes, where the underlying rgba flips polarity.
         fill: {
@@ -31,7 +34,7 @@ export default {
         },
       },
       fontFamily: {
-        mono: ['"Fira Code"', "ui-monospace", "monospace"],
+        mono: ['"JetBrains Mono Variable"', '"Fira Code"', "ui-monospace", "monospace"],
       },
       borderRadius: {
         cx: "var(--radius)",

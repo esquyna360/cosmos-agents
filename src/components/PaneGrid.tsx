@@ -10,9 +10,10 @@ import {
   X,
 } from "lucide-solid";
 
-import Terminal from "./Terminal";
+import { SessionBody } from "./SessionView";
 import {
-  createRunnerInProject,
+  newSession,
+  newTerminal,
   resetRunnerSession,
   respawnTick,
   restartRunner,
@@ -188,7 +189,8 @@ function Pane(props: {
           }}
           onNew={async (kind) => {
             setPicking(false);
-            const r = await createRunnerInProject(props.project.id, kind).catch(
+            const make = kind === "agent" ? newSession : newTerminal;
+            const r = await make(props.project.id).catch(
               console.error,
             );
             if (r) setSlot(props.project.id, props.index, r.id);
@@ -206,19 +208,11 @@ function Pane(props: {
           keyed
           fallback={
             <div class="flex flex-1 items-center justify-center px-4 text-center text-[11.5px] leading-relaxed text-faint">
-              nenhum runner neste painel
+              Nenhuma sessão neste painel
             </div>
           }
         >
-          <Terminal
-            runner={props.runner!}
-            projectId={props.project.id}
-            cwd={
-              props.runner!.kind === "shell"
-                ? (props.project.folders[0] ?? props.project.cwd)
-                : props.project.cwd
-            }
-          />
+          <SessionBody project={props.project} runner={props.runner!} />
         </Show>
       </div>
     </section>
@@ -310,7 +304,7 @@ function RunnerPicker(props: {
           class="flex flex-1 items-center justify-center gap-1.5 py-1.5 text-[11px] text-dim transition hover:bg-fill-2 hover:text-ink"
           onClick={() => props.onNew("shell")}
         >
-          <TerminalSquare size={11} /> novo shell
+          <TerminalSquare size={11} /> novo terminal
         </button>
       </div>
     </div>

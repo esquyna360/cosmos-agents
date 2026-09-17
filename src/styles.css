@@ -1,3 +1,5 @@
+@import "@fontsource-variable/instrument-sans";
+@import "@fontsource-variable/jetbrains-mono";
 @import "@fontsource/fira-code/400.css";
 @import "@fontsource/fira-code/500.css";
 @import "@xterm/xterm/css/xterm.css";
@@ -22,6 +24,100 @@
    terminal is never the one surface that ignores the theme. */
 
 :root,
+:root[data-theme="night"] {
+  color-scheme: dark;
+
+  --app-bg: #111214;
+  --void: #111214;
+  --panel: #16171a;
+  --raised: #1c1e22;
+  --float: #24262b;
+  --sunken: rgba(0, 0, 0, 0.28);
+
+  --fill-1: rgba(255, 255, 255, 0.04);
+  --fill-2: rgba(255, 255, 255, 0.07);
+  --fill-3: rgba(255, 255, 255, 0.11);
+  --fill-4: rgba(255, 255, 255, 0.18);
+
+  --line: rgba(255, 255, 255, 0.075);
+  --line-strong: rgba(255, 255, 255, 0.15);
+
+  --text: #ededf0;
+  --text-dim: #a3a6af;
+  --text-faint: #6b6e78;
+
+  --accent: #909cff;
+  --accent-soft: rgba(144, 156, 255, 0.15);
+  --accent-ink: #0c0f2b;
+  --live: #5fd39a;
+  --busy: #f2b84b;
+  --busy-soft: rgba(242, 184, 75, 0.13);
+  --alert: #f2777a;
+  --alert-soft: rgba(242, 119, 122, 0.13);
+  --add-soft: rgba(95, 211, 154, 0.12);
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 20px 50px -18px rgba(0, 0, 0, 0.75);
+
+  --term-bg: #111214;
+  --term-fg: #e4e5ea;
+  --term-black: #24262b;
+  --term-red: #f2777a;
+  --term-green: #5fd39a;
+  --term-yellow: #f2b84b;
+  --term-blue: #909cff;
+  --term-magenta: #d29bf5;
+  --term-cyan: #6fd3e0;
+  --term-white: #cfd1d8;
+}
+
+:root[data-theme="day"] {
+  color-scheme: light;
+
+  --app-bg: #f3f3f1;
+  --void: #f3f3f1;
+  --panel: #fafaf9;
+  --raised: #ffffff;
+  --float: #ffffff;
+  --sunken: rgba(20, 20, 30, 0.04);
+
+  --fill-1: rgba(20, 22, 40, 0.035);
+  --fill-2: rgba(20, 22, 40, 0.065);
+  --fill-3: rgba(20, 22, 40, 0.1);
+  --fill-4: rgba(20, 22, 40, 0.18);
+
+  --line: rgba(20, 22, 40, 0.09);
+  --line-strong: rgba(20, 22, 40, 0.18);
+
+  --text: #1a1b20;
+  --text-dim: #585b66;
+  --text-faint: #8b8e99;
+
+  --accent: #4450d4;
+  --accent-soft: rgba(68, 80, 212, 0.11);
+  --accent-ink: #ffffff;
+  --live: #1c9a5f;
+  --busy: #b3700f;
+  --busy-soft: rgba(200, 130, 20, 0.12);
+  --alert: #d0393d;
+  --alert-soft: rgba(208, 57, 61, 0.1);
+  --add-soft: rgba(28, 154, 95, 0.1);
+
+  --shadow-1: 0 1px 2px rgba(20, 22, 40, 0.08);
+  --shadow-2: 0 20px 50px -20px rgba(20, 22, 40, 0.28);
+
+  --term-bg: #fafaf9;
+  --term-fg: #1a1b20;
+  --term-black: #1a1b20;
+  --term-red: #c4313a;
+  --term-green: #15803d;
+  --term-yellow: #a16207;
+  --term-blue: #3744c4;
+  --term-magenta: #8b3fc0;
+  --term-cyan: #0e7490;
+  --term-white: #6b6e78;
+}
+
 :root[data-theme="midnight"] {
   color-scheme: dark;
 
@@ -312,8 +408,8 @@ html {
 body {
   background: transparent;
   font-family:
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
-    "Helvetica Neue", sans-serif;
+    "Instrument Sans Variable", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
   -webkit-font-smoothing: antialiased;
   font-size: 13px;
   overscroll-behavior: none;
@@ -376,6 +472,44 @@ body {
   box-shadow: var(--shadow-2);
 }
 
+.cx-icon-btn {
+  display: flex;
+  height: 26px;
+  width: 26px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  color: var(--text-faint);
+  transition:
+    background-color 0.12s,
+    color 0.12s;
+}
+.cx-icon-btn:hover {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.cx-icon-btn[data-on="true"] {
+  background: var(--fill-2);
+  color: var(--text);
+}
+
+.cx-kbd {
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 5px;
+  color: var(--text-faint);
+  background: var(--fill-2);
+}
+
+button:focus-visible,
+[role="menuitem"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .cx-card {
   background: var(--raised);
   border: 1px solid var(--line);
@@ -408,6 +542,26 @@ body {
 }
 .cx-pulse {
   animation: cx-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes cx-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.cx-spin {
+  animation: cx-spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cx-spin,
+  .cx-pulse {
+    animation-duration: 2.4s;
+  }
+  .cx-pane,
+  .cx-sheet {
+    animation: none;
+  }
 }
 
 @keyframes cx-sheet-in {
@@ -476,11 +630,29 @@ body {
   padding-left: 1.4em;
   margin: 0.5em 0;
 }
+.cosmos-prose ul {
+  list-style: disc;
+}
+.cosmos-prose ol {
+  list-style: decimal;
+}
 .cosmos-prose li {
   margin: 0.15em 0;
 }
+.cosmos-prose li::marker {
+  color: var(--text-faint);
+}
+.chat-prose > :first-child {
+  margin-top: 0;
+}
+.chat-prose > :last-child {
+  margin-bottom: 0;
+}
+.chat-prose pre {
+  overflow-x: auto;
+}
 .cosmos-prose code {
-  font-family: "Fira Code", ui-monospace, monospace;
+  font-family: "JetBrains Mono Variable", "Fira Code", ui-monospace, monospace;
   font-size: 0.9em;
   background: var(--fill-2);
   border: 1px solid var(--line);

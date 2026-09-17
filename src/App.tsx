@@ -11,66 +11,68 @@ import {
   requestPermission,
   sendNotification,
 } from "@tauri-apps/plugin-notification";
-import { Layers, Layers2 } from "lucide-solid";
+import { ArrowLeft, Layers, MessageSquare, SquareTerminal } from "lucide-solid";
 
 import Sidebar from "./components/Sidebar";
-import TitleBar from "./components/TitleBar";
-import ProjectBar from "./components/ProjectBar";
 import PaneGrid from "./components/PaneGrid";
+import SessionView from "./components/SessionView";
+import Inspector from "./components/Inspector";
+import JumpPalette from "./components/JumpPalette";
 import Editor from "./components/Editor";
-import InputBar from "./components/InputBar";
 import CommandPalette, { type PaletteMode } from "./components/CommandPalette";
 import DiffView from "./components/DiffView";
 import WorkflowView from "./components/WorkflowView";
 import AgentCreatorModal from "./components/AgentCreatorModal";
 import UpdateBanner from "./components/UpdateBanner";
-import RunnerTabs from "./components/RunnerTabs";
 import MemoryView from "./components/MemoryView";
 import Browser from "./components/Browser";
 import SettingsPanel from "./components/SettingsPanel";
-import InlineEdit from "./components/InlineEdit";
-import { colorForPath } from "./lib/colorHash";
+import { MenuHost } from "./ui/Menu";
 import { creator, openCreator, closeCreator } from "./stores/creator";
 import {
   attachExternalChangesListener,
   attachRunnerStatusListener,
-  createRunnerInProject,
   editorOpenRequest,
   focusByProjectIndex,
   focusedProject,
   focusedRunner,
   loadProjects,
   migrateLegacyLocalStorage,
+  newSession,
+  newTerminal,
   projectsStore,
+  setRunnerMode,
   sleepProject,
   stopRunner,
-  updateProject,
   type ProjectUI,
 } from "./stores/projects";
+import { attachChatListeners } from "./stores/chat";
+import { jumpOpen, openJump } from "./stores/jump";
 import {
-  composerExpanded,
-  composerVisible,
   cycleView,
+  inspector,
   settingsOpen,
   setView,
   setWorkflowOpen,
   sidebarOpen,
-  toggleComposer,
   toggleSettings,
   toggleSidebar,
   toggleWorkflow,
   view,
   workflowOpen,
+  type ViewMode,
 } from "./stores/layout";
 import {
   LAYOUTS,
+  layout,
   setActiveSlot,
   setLayout,
   toggleSplit,
 } from "./stores/panes";
 import { cycleTheme, initTheme } from "./stores/theme";
 import { startUpdateWatch } from "./stores/updates";
-import type { AgentStatus } from "./lib/ipc";
+import { ptyLiveIds, type AgentStatus } from "./lib/ipc";
+import { isClaudeRunner } from "./lib/projects";
 
 export default function App() {
   const [palette, setPalette] = createSignal<PaletteMode | null>(null);
@@ -84,7 +86,10 @@ export default function App() {
     initTheme();
     startUpdateWatch();
     migrateLegacyLocalStorage();
-    loadProjects().catch(console.error);
+    loadProjects()
+      .then(ptyLiveIds)
+      .then(attachChatListeners)
+      .catch(console.error);
     attachRunnerStatusListener().catch(console.error);
     attachExternalChangesListener().catch(console.error);
     // Probe installed AI CLIs in the background — the result fills the
@@ -112,14 +117,15 @@ export default function App() {
         const becameIdle =
           (previous === "streaming" || previous === "tool_running") &&
           status === "idle";
-        const focusedId = focusedRunner()?.id ?? null;
-        if (becameIdle && runnerId !== focusedId && notifAllowed) {
+        const needsYou = status === "awaiting_input" && previous !== "awaiting_input";
+        const watching = runnerId === (focusedRunner()?.id ?? null) && document.hasFocus();
+        if ((becameIdle || needsYou) && !watching && notifAllowed) {
           const proj = projectsStore.list.find((p) => p.id === projectId);
           const r = proj?.runners.find((x) => x.id === runnerId);
           if (r) {
             sendNotification({
-              title: `${r.name} terminou`,
-              body: `${proj?.name ?? "projeto"} · pronto para o próximo passo.`,
+              title: needsYou ? `${r.name} precisa de você` : `${r.name} terminou`,
+              body: proj?.name ?? "",
             });
           }
         }
@@ -176,10 +182,18 @@ export default function App() {
         openCreator({ mode: "project" });
         return;
       }
-      if (key === "n" && e.shiftKey) {
+      if (key === "n") {
         e.preventDefault();
         const p = focusedProject();
-        if (p) createRunnerInProject(p.id, "agent").catch(console.error);
+        if (!p) return;
+        setView("runners");
+        (e.shiftKey ? newTerminal(p.id) : newSession(p.id)).catch(console.error);
+        return;
+      }
+      if (key === "j") {
+        e.preventDefault();
+        const r = focusedRunner();
+        if (r && isClaudeRunner(r)) setRunnerMode(r.id, r.mode === "chat" ? "tty" : "chat").catch(console.error);
         return;
       }
       if (key === "w" && e.shiftKey) {
@@ -199,12 +213,14 @@ export default function App() {
         cycleView();
         return;
       }
-      if (key === "i") {
+      if (key === "k" && !e.shiftKey) {
+        // ⌘K clears a shell's screen; the terminal claims it first there.
+        if (e.defaultPrevented) return;
         e.preventDefault();
-        toggleComposer();
+        openJump();
         return;
       }
-      if (key === "p" || (key === "k" && !e.shiftKey)) {
+      if (key === "p") {
         e.preventDefault();
         if (focusedProject()) setPalette("files");
         return;
@@ -232,149 +248,169 @@ export default function App() {
     });
   });
 
-  // Computes the folder roots Editor/Diff use. With the new model the
-  // project IS the source of truth (no separate workspace lookup needed).
   const roots = () => focusedProject()?.folders ?? [];
 
   return (
-    <div class="flex h-screen w-screen flex-col overflow-hidden bg-void text-ink">
-      <TitleBar center={<ProjectIdentity />} />
+    <div class="flex h-screen w-screen overflow-hidden bg-void text-ink">
+      <Show when={sidebarOpen()}>
+        <Sidebar />
+      </Show>
 
-      <div class="relative flex min-h-0 min-w-0 flex-1">
-        <Show when={sidebarOpen()}>
-          <Sidebar />
+      <main class="relative flex min-h-0 min-w-0 flex-1 flex-col bg-void">
+        <Show when={workflowOpen()}>
+          <WorkflowView />
         </Show>
 
-        <main class="relative flex min-h-0 min-w-0 flex-1 flex-col bg-void">
-          <Show when={workflowOpen()}>
-            <WorkflowView />
-          </Show>
-
-          <Show when={!workflowOpen()}>
-            <Show when={focusedProject()} fallback={<EmptyState />} keyed>
-              {(p) => (
-                <>
-                  <Show when={!composerExpanded()}>
-                    <ProjectBar project={p} />
-                    <Show when={view() === "runners"}>
-                      <RunnerTabs project={p} />
-                    </Show>
-                  </Show>
-
-                  <Show when={view() === "runners"}>
-                    <div
-                      class="flex min-h-0 min-w-0 flex-1 flex-col"
-                      classList={{ hidden: composerExpanded() }}
+        <Show when={!workflowOpen()}>
+          <Show when={focusedProject()} fallback={<NoProjects />} keyed>
+            {(p) => (
+              <>
+                <Show when={view() === "runners"}>
+                  <div class="flex min-h-0 min-w-0 flex-1">
+                    <Show
+                      when={layout() === "single"}
+                      fallback={
+                        <div class="flex min-h-0 min-w-0 flex-1 flex-col pt-7" data-tauri-drag-region>
+                          <PaneGrid project={p} />
+                        </div>
+                      }
                     >
-                      <PaneGrid project={p} />
-                    </div>
-                    <Show when={composerVisible() && focusedRunner()} keyed>
-                      {(r) => <InputBar id={r.id} agentName={r.name} />}
+                      <Show when={focusedRunner()} fallback={<NoSessions project={p} />}>
+                        {(r) => <SessionView project={p} runner={r()} />}
+                      </Show>
                     </Show>
-                  </Show>
-                  <Show when={view() === "editor"}>
-                    <Editor roots={roots()} />
-                  </Show>
-                  <Show when={view() === "diff"}>
-                    <DiffView roots={roots()} />
-                  </Show>
-                  <Show when={view() === "memory"}>
-                    <MemoryView project={p} />
-                  </Show>
-                  <Show when={view() === "browser"}>
-                    <Browser projectId={p.id} />
-                  </Show>
-                </>
-              )}
-            </Show>
-
-            <Show when={palette() && focusedProject()}>
-              <CommandPalette
-                mode={palette()!}
-                roots={roots()}
-                onClose={() => setPalette(null)}
-              />
-            </Show>
+                    <Show when={inspector()}>
+                      <Inspector project={p} runner={focusedRunner()} />
+                    </Show>
+                  </div>
+                </Show>
+                <Show when={view() !== "runners"}>
+                  <ViewBar project={p} />
+                </Show>
+                <Show when={view() === "editor"}>
+                  <Editor roots={roots()} />
+                </Show>
+                <Show when={view() === "diff"}>
+                  <DiffView roots={roots()} />
+                </Show>
+                <Show when={view() === "memory"}>
+                  <MemoryView project={p} />
+                </Show>
+                <Show when={view() === "browser"}>
+                  <Browser projectId={p.id} />
+                </Show>
+              </>
+            )}
           </Show>
 
-          <Show when={creator()}>
-            <AgentCreatorModal
-              editingProjectId={creator()!.editingProjectId}
-              onClose={closeCreator}
-            />
+          <Show when={palette() && focusedProject()}>
+            <CommandPalette mode={palette()!} roots={roots()} onClose={() => setPalette(null)} />
           </Show>
-        </main>
-      </div>
+        </Show>
+
+        <Show when={creator()}>
+          <AgentCreatorModal editingProjectId={creator()!.editingProjectId} onClose={closeCreator} />
+        </Show>
+      </main>
+
+      <Show when={jumpOpen()}>
+        <JumpPalette />
+      </Show>
       <Show when={settingsOpen()}>
         <SettingsPanel />
       </Show>
+      <MenuHost />
       <UpdateBanner />
     </div>
   );
 }
 
-/** The project's name and shape, shown in the middle of the title bar. */
-function ProjectIdentity() {
-  const p = () => focusedProject() as ProjectUI | null;
+const VIEW_NAMES: Record<ViewMode, string> = {
+  runners: "Sessões",
+  editor: "Arquivos",
+  diff: "Mudanças",
+  memory: "Memória",
+  browser: "Navegador",
+};
+
+/** Header for the project-level tools; the way back to the sessions. */
+function ViewBar(props: { project: ProjectUI }) {
+  const others: ViewMode[] = ["editor", "diff", "memory", "browser"];
   return (
-    <Show when={p()} keyed>
-      {(proj) => (
-        <div data-tauri-drag-region="false" class="flex min-w-0 items-center gap-2">
-          <span
-            class="h-2 w-2 shrink-0 rounded-full"
-            style={{
-              "background-color": colorForPath(proj.cwd),
-              "box-shadow": proj.promotedLive
-                ? `0 0 8px ${colorForPath(proj.cwd)}`
-                : "none",
-              opacity: proj.promotedLive ? 1 : 0.4,
-            }}
-          />
-          <Show when={proj.folders.length > 1}>
-            <Layers2 size={12} class="shrink-0 text-faint" />
-          </Show>
-          <span class="min-w-0 truncate text-[13px] font-medium">
-            <InlineEdit
-              value={proj.name}
-              onCommit={(next) => {
-                const trimmed = next.trim();
-                if (!trimmed || trimmed === proj.name) return;
-                updateProject(proj.id, trimmed, proj.folders, proj.memory).catch(
-                  console.error,
-                );
-              }}
-            >
-              {(name) => (
-                <span
-                  class="truncate"
-                  title={`slug: ${proj.slug} — renomear muda o rótulo, não a pasta`}
-                >
-                  {name}
-                </span>
-              )}
-            </InlineEdit>
-          </span>
-        </div>
-      )}
-    </Show>
+    <header
+      data-tauri-drag-region
+      class="flex h-[46px] shrink-0 items-center gap-1 border-b border-line pr-3"
+      classList={{ "pl-[84px]": !sidebarOpen(), "pl-2.5": sidebarOpen() }}
+    >
+      <button
+        class="mr-1 flex items-center gap-1.5 rounded-md px-2 py-1 text-[12.5px] text-dim transition hover:bg-fill-2 hover:text-ink"
+        onClick={() => setView("runners")}
+      >
+        <ArrowLeft size={13} />
+        Sessões
+      </button>
+      {others.map((id) => (
+        <button
+          class="rounded-md px-2.5 py-1 text-[12.5px] transition"
+          classList={{
+            "bg-fill-2 text-ink": view() === id,
+            "text-faint hover:text-ink": view() !== id,
+          }}
+          onClick={() => setView(id)}
+        >
+          {VIEW_NAMES[id]}
+        </button>
+      ))}
+      <span class="ml-auto truncate text-[12px] text-faint">{props.project.name}</span>
+    </header>
   );
 }
 
-function EmptyState() {
+function NoSessions(props: { project: ProjectUI }) {
   return (
-    <div class="flex flex-1 flex-col items-center justify-center gap-4 text-faint">
-      <div class="flex h-14 w-14 items-center justify-center rounded-2xl border border-line bg-fill-1">
-        <Layers size={22} class="text-dim" />
+    <div data-tauri-drag-region class="flex flex-1 flex-col items-center justify-center gap-3">
+      <p class="text-[15px] font-medium text-ink">{props.project.name} ainda não tem sessões</p>
+      <p class="max-w-[360px] text-center text-[13px] leading-relaxed text-dim">
+        Uma sessão é uma conversa com o Claude sobre uma coisa só. Abra quantas precisar; cada uma
+        ganha um nome sozinha.
+      </p>
+      <div class="mt-1 flex gap-2">
+        <button
+          class="flex items-center gap-2 rounded-md bg-accent px-3 py-1.5 text-[12.5px] font-medium text-accent-ink transition hover:opacity-90"
+          onClick={() => void newSession(props.project.id)}
+        >
+          <MessageSquare size={13} />
+          Nova sessão
+          <span class="opacity-70">⌘N</span>
+        </button>
+        <button
+          class="flex items-center gap-2 rounded-md border border-line-strong px-3 py-1.5 text-[12.5px] text-ink transition hover:bg-fill-2"
+          onClick={() => void newTerminal(props.project.id)}
+        >
+          <SquareTerminal size={13} />
+          Novo terminal
+        </button>
       </div>
-      <p class="text-[13px] text-dim">nenhum projeto ainda</p>
+    </div>
+  );
+}
+
+function NoProjects() {
+  return (
+    <div data-tauri-drag-region class="flex flex-1 flex-col items-center justify-center gap-3">
+      <p class="text-[15px] font-medium text-ink">Nenhum projeto ainda</p>
+      <p class="max-w-[340px] text-center text-[13px] leading-relaxed text-dim">
+        Um projeto junta as pastas em que você trabalha. As sessões do Claude e os terminais ficam
+        dentro dele.
+      </p>
       <button
-        class="flex items-center gap-2 rounded-lg border border-line px-3.5 py-2 text-[12.5px] text-ink transition hover:border-line-strong hover:bg-fill-2"
+        class="mt-1 flex items-center gap-2 rounded-md bg-accent px-3 py-1.5 text-[12.5px] font-medium text-accent-ink transition hover:opacity-90"
         onClick={() => openCreator({ mode: "project" })}
       >
         <Layers size={13} />
-        criar projeto
+        Criar projeto
+        <span class="opacity-70">⌘T</span>
       </button>
-      <p class="text-[11px]">⌘T de qualquer lugar</p>
     </div>
   );
 }

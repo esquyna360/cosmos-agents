@@ -155,13 +155,8 @@ impl PtySupervisor {
         // in dev, Contents/MacOS/ in a packaged .app, %LocalAppData%\… on
         // Windows). `join_paths` uses the platform's separator (`:` on Unix,
         // `;` on Windows).
-        if let Some(cli_dir) = cosmos_cli_dir() {
-            let prev = std::env::var_os("PATH").unwrap_or_default();
-            let mut entries: Vec<std::path::PathBuf> = vec![cli_dir];
-            entries.extend(std::env::split_paths(&prev));
-            if let Ok(joined) = std::env::join_paths(entries) {
-                cmd.env("PATH", joined);
-            }
+        if let Some(joined) = path_with_cli_dir() {
+            cmd.env("PATH", joined);
         }
 
         let child = pair.slave.spawn_command(cmd)?;
@@ -392,10 +387,19 @@ fn cosmos_cli_dir() -> Option<std::path::PathBuf> {
         .map(|p| p.to_path_buf())
 }
 
+/// `PATH` with the cosmos CLI's dir in front, shared by every spawn path.
+pub(crate) fn path_with_cli_dir() -> Option<std::ffi::OsString> {
+    let cli_dir = cosmos_cli_dir()?;
+    let prev = std::env::var_os("PATH").unwrap_or_default();
+    let mut entries: Vec<std::path::PathBuf> = vec![cli_dir];
+    entries.extend(std::env::split_paths(&prev));
+    std::env::join_paths(entries).ok()
+}
+
 /// Cross-platform home directory lookup. HOME on Unix, USERPROFILE on
 /// Windows. Returns None when the env var is missing — callers treat that
 /// as "no socket env var injected" rather than panicking.
-fn home_dir() -> Option<std::path::PathBuf> {
+pub(crate) fn home_dir() -> Option<std::path::PathBuf> {
     #[cfg(windows)]
     let var = "USERPROFILE";
     #[cfg(not(windows))]

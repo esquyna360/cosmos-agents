@@ -117,3 +117,29 @@ export function setSettingsOpen(v: boolean): void {
 export function toggleSettings(): void {
   setSettingsOpenRaw((v) => !v);
 }
+
+const TERM_FONT_KEY = "cosmos.term.fontSize";
+const [termFontSize, setTermFontSizeRaw] = createSignal<number>(
+  Number(localStorage.getItem(TERM_FONT_KEY)) || 13,
+);
+export { termFontSize };
+export function setTermFontSize(px: number): void {
+  const clamped = Math.max(10, Math.min(22, px));
+  setTermFontSizeRaw(clamped);
+  localStorage.setItem(TERM_FONT_KEY, String(clamped));
+}
+
+/** Right-hand panel: what changed, how much context is left. */
+export type InspectorTab = "changes" | "context";
+const INSPECTOR_KEY = "cosmos.inspector";
+const [inspector, setInspectorRaw] = createSignal<InspectorTab | null>(
+  ((v) => (v === "changes" || v === "context" ? v : null))(localStorage.getItem(INSPECTOR_KEY)),
+);
+export { inspector };
+export function setInspector(v: InspectorTab | null): void {
+  setInspectorRaw(v);
+  localStorage.setItem(INSPECTOR_KEY, v ?? "");
+}
+export function toggleInspector(): void {
+  setInspector(inspector() ? null : "changes");
+}

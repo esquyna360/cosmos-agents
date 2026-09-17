@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type { AgentStatus } from "./ipc";
 
 export type RunnerKind = "agent" | "shell";
+/// How an agent is driven: native chat over stream-json, or the CLI's own TUI.
+export type RunnerMode = "chat" | "tty";
 
 /// Wire shape — superset of AgentStatus with shell-only lifecycle states.
 export type RunnerStatus = AgentStatus | "running" | "exited";
@@ -33,6 +35,9 @@ export interface Runner {
   lastActive: number;
   /// Claude session UUID this runner resumes into. Empty for shells.
   sessionId: string;
+  mode: RunnerMode;
+  /// The name was machine-written and may be replaced by an auto-title.
+  nameAuto: boolean;
 }
 
 interface ProjectSnake {
@@ -57,6 +62,8 @@ interface RunnerSnake {
   created_at: number;
   last_active: number;
   session_id: string;
+  mode?: string;
+  name_auto?: boolean;
 }
 
 function projectFromSnake(r: ProjectSnake): Project {
@@ -84,6 +91,8 @@ function runnerFromSnake(r: RunnerSnake): Runner {
     createdAt: r.created_at,
     lastActive: r.last_active,
     sessionId: r.session_id ?? "",
+    mode: r.mode === "chat" ? "chat" : "tty",
+    nameAuto: !!r.name_auto,
   };
 }
 
@@ -127,8 +136,12 @@ export async function runnersCreate(opts: {
   program?: string;
   args?: string[];
   env?: Record<string, string>;
+  mode?: RunnerMode;
+  nameAuto?: boolean;
 }): Promise<Runner> {
   const r = await invoke<RunnerSnake>("runners_create", {
+    mode: opts.mode ?? null,
+    nameAuto: opts.nameAuto ?? false,
     projectId: opts.projectId,
     kind: opts.kind,
     name: opts.name,
@@ -139,8 +152,13 @@ export async function runnersCreate(opts: {
   return runnerFromSnake(r);
 }
 
-export function runnersUpdate(id: string, name: string): Promise<void> {
-  return invoke("runners_update", { id, name });
+/// `auto` marks a machine-written title, which a later auto-title may replace.
+export function runnersUpdate(id: string, name: string, auto = false): Promise<void> {
+  return invoke("runners_update", { id, name, auto });
+}
+
+export function runnersSetMode(id: string, mode: RunnerMode): Promise<void> {
+  return invoke("runners_set_mode", { id, mode });
 }
 
 /// Removes the runner row for good. Only reachable behind an explicit
@@ -166,4 +184,14 @@ export function projectsClose(id: string): Promise<void> {
 
 export function ptyKillProject(projectId: string): Promise<void> {
   return invoke("pty_kill_project", { projectId });
+}
+
+/** Only Claude Code sessions can be shown as a chat; other CLIs are TUIs. */
+export function isClaudeRunner(r: { kind: RunnerKind; args: string[] }): boolean {
+  return r.kind === "agent" && r.args.some((a) => a.includes("claude --dangerously-skip-permissions"));
+}
+
+/** Opens a folder in Finder, or in the named app ("Visual Studio Code"). */
+export function openPath(path: string, app?: string): Promise<void> {
+  return invoke("open_path", { path, app: app ?? null });
 }
