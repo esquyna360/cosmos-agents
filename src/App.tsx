@@ -1,6 +1,7 @@
 import {
   createEffect,
   createSignal,
+  on,
   onCleanup,
   onMount,
   Show,
@@ -74,13 +75,17 @@ export default function App() {
   const [palette, setPalette] = createSignal<PaletteMode | null>(null);
 
   // Opening a file via palette/grep auto-switches to the editor.
-  createEffect(() => {
-    if (!editorOpenRequest()) return;
-    const id = routeProjectId();
-    if (!id) return;
-    go({ kind: "project", projectId: id });
-    setProjectTab("files");
-  });
+  // Only a new request navigates: tracking the route here would bounce every
+  // later navigation back to the project.
+  createEffect(
+    on(editorOpenRequest, (req) => {
+      if (!req) return;
+      const id = routeProjectId();
+      if (!id) return;
+      if (route().kind !== "project") go({ kind: "project", projectId: id });
+      setProjectTab("files");
+    }),
+  );
 
   onMount(() => {
     initTheme();

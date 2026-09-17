@@ -20,7 +20,8 @@ import { isMasterProject } from "../stores/projects";
 import { branchOf } from "../stores/git";
 import { relativeTime } from "../lib/time";
 import { shortPath } from "../lib/toolDisplay";
-import StatusGlyph, { glyphFor, needsYou, stateOf, TONE_TEXT } from "../ui/StatusGlyph";
+import { needsYou, stateOf, TONE_TEXT } from "../ui/StatusGlyph";
+import { ProjectIcon, RunnerIcon } from "../ui/EntityIcon";
 import { openMenu } from "../ui/Menu";
 import { projectMenu, runnerMenu } from "./menus";
 
@@ -116,9 +117,10 @@ export default function HomeView() {
                     }}
                   >
                     <button
-                      class="font-heading text-[14.5px] text-ink hover:text-accent"
+                      class="font-heading flex items-center gap-1.5 text-[14.5px] text-ink hover:text-accent"
                       onClick={() => focusProject(g.p.id)}
                     >
+                      <ProjectIcon size={14} class="text-faint" />
                       {projectLabel(g.p)}
                     </button>
                     <span class="truncate font-mono text-[11px] text-faint">
@@ -161,17 +163,7 @@ function Row(props: { project: ProjectUI; runner: RunnerUI }) {
       }}
     >
       <span class="flex min-w-0 items-center gap-2">
-        <Show
-          when={shell()}
-          fallback={<StatusGlyph glyph={glyphFor(r())} size={13} />}
-        >
-          <span
-            class="flex h-[18px] w-[24px] shrink-0 items-center justify-center rounded-[5px] bg-well font-mono text-[9.5px]"
-            classList={{ "text-[#a9bb8a]": r().live, "text-[#7f776b]": !r().live }}
-          >
-            &gt;_
-          </span>
-        </Show>
+        <RunnerIcon runner={r()} size={14} ring="var(--void)" />
         <span class="truncate text-ink" classList={{ "font-mono text-[12px]": shell() }}>
           {r().name}
         </span>

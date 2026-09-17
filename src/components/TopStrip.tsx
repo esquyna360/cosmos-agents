@@ -22,7 +22,7 @@ import { needsYou } from "../ui/StatusGlyph";
 import { openMenu } from "../ui/Menu";
 import { projectMenu, runnerMenu } from "./menus";
 import { childrenOf, navOptionsMenu } from "./SideNav";
-import StatusGlyph, { glyphFor } from "../ui/StatusGlyph";
+import { RunnerIcon } from "../ui/EntityIcon";
 
 /** The one piece of chrome that never changes: three fixed places, the
  *  projects you have open, and where you are inside one. */
@@ -223,11 +223,7 @@ export function ChildStrip() {
                 openMenu(e, runnerMenu(project()!, r));
               }}
             >
-              <Show when={r.kind === "shell"} fallback={<StatusGlyph glyph={glyphFor(r)} size={11} />}>
-                <span class="text-[10px]" classList={{ "text-live": r.live, "text-faint": !r.live }}>
-                  &gt;_
-                </span>
-              </Show>
+              <RunnerIcon runner={r} size={13} />
               <span class="max-w-[180px] truncate">{r.name}</span>
             </button>
           )}

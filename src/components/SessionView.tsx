@@ -8,6 +8,7 @@ import {
   GitCompareArrows,
   MessageSquare,
   SquareTerminal,
+  ChevronLeft,
 } from "lucide-solid";
 
 import {
@@ -30,7 +31,8 @@ import { prettyModel } from "./chat/Composer";
 import InlineEdit from "./InlineEdit";
 import Terminal from "./Terminal";
 import ChatView from "./chat/ChatView";
-import StatusGlyph, { glyphFor, stateOf, TONE_TEXT } from "../ui/StatusGlyph";
+import { stateOf, TONE_TEXT } from "../ui/StatusGlyph";
+import { ProjectIcon, RunnerIcon } from "../ui/EntityIcon";
 import { openMenu } from "../ui/Menu";
 import { runnerMenu } from "./menus";
 
@@ -81,7 +83,15 @@ export default function SessionView(props: Props) {
       <header class="flex shrink-0 items-center gap-4 border-b border-line px-5 py-2.5">
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2">
-            <StatusGlyph glyph={glyphFor(r())} />
+            <button
+              class="cx-icon-btn -ml-1.5"
+              title={`Voltar para ${projectLabel(props.project)}`}
+              aria-label="Voltar para o projeto"
+              onClick={() => focusProject(props.project.id)}
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <RunnerIcon runner={r()} size={17} ring="var(--void)" />
             <h1
               class="min-w-0 truncate text-[17px] leading-tight text-ink"
               classList={{ "font-heading": r().kind === "agent", "font-mono text-[14px]": r().kind === "shell" }}
@@ -100,7 +110,11 @@ export default function SessionView(props: Props) {
             <span class={`shrink-0 text-[12px] ${TONE_TEXT[state().tone]}`}>{state().label}</span>
           </div>
           <div class="mt-1 flex min-w-0 items-center gap-2.5 text-[11.5px] text-faint">
-            <button class="shrink-0 text-dim hover:text-accent" onClick={() => focusProject(props.project.id)}>
+            <button
+              class="flex shrink-0 items-center gap-1 text-dim hover:text-accent"
+              onClick={() => focusProject(props.project.id)}
+            >
+              <ProjectIcon size={12} />
               {projectLabel(props.project)}
             </button>
             <Show when={branch()}>

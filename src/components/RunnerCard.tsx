@@ -1,11 +1,12 @@
 import { Show } from "solid-js";
-import { GitBranch } from "lucide-solid";
+import { GitBranch, SquareTerminal } from "lucide-solid";
 
 import { focusRunner, type ProjectUI, type RunnerUI } from "../stores/projects";
 import { branchOf } from "../stores/git";
 import { relativeTime } from "../lib/time";
 import { shortPath } from "../lib/toolDisplay";
-import StatusGlyph, { glyphFor, stateOf, TONE_TEXT } from "../ui/StatusGlyph";
+import { glyphFor, stateOf, TONE_TEXT } from "../ui/StatusGlyph";
+import { RunnerIcon } from "../ui/EntityIcon";
 import { openMenu } from "../ui/Menu";
 import { runnerMenu } from "./menus";
 
@@ -32,7 +33,10 @@ export function AgentCard(props: Props) {
         openMenu(e, runnerMenu(props.project, r()));
       }}
     >
-      <span class="font-heading line-clamp-2 text-[15px] leading-[1.2] text-ink">{r().name}</span>
+      <span class="flex items-start gap-2">
+        <RunnerIcon runner={r()} size={16} ring="var(--card, var(--panel))" />
+        <span class="font-heading line-clamp-2 min-w-0 text-[15px] leading-[1.2] text-ink">{r().name}</span>
+      </span>
       <span
         class="line-clamp-2 text-[12px] leading-snug"
         classList={{ "text-dim": Boolean(r().activity || r().task), "text-faint": !(r().activity || r().task) }}
@@ -40,7 +44,6 @@ export function AgentCard(props: Props) {
         {line()}
       </span>
       <span class="mt-auto flex items-center gap-1.5 pt-1 text-[11.5px]">
-        <StatusGlyph glyph={glyphFor(r())} size={12} />
         <span class={TONE_TEXT[state().tone]}>{state().label}</span>
         <Show when={r().cwd && branch()}>
           <span class="ml-auto flex min-w-0 items-center gap-1 text-faint" title="Worktree própria">
@@ -68,7 +71,7 @@ export function ShellCard(props: Props) {
         openMenu(e, runnerMenu(props.project, r()));
       }}
     >
-      <span classList={{ "text-[#a9bb8a]": r().live, "text-[#7f776b]": !r().live }}>&gt;_</span>
+      <SquareTerminal size={13} stroke-width={1.7} class={r().live ? "text-[#a9bb8a]" : "text-[#7f776b]"} />
       <span class="min-w-0 flex-1 truncate text-[#f0e6d5]">{r().name}</span>
       <span class="max-w-[45%] truncate text-[11px] text-[#7f776b]">
         {shortPath(r().cwd || props.project.folders[0] || "", [])}

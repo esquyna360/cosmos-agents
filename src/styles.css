@@ -581,6 +581,12 @@ body {
   box-shadow: var(--shadow-2);
 }
 
+.cx-veil {
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  backdrop-filter: saturate(1.5) blur(22px);
+  -webkit-backdrop-filter: saturate(1.5) blur(22px);
+}
+
 .cx-icon-btn {
   display: flex;
   height: 26px;

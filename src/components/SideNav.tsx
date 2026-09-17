@@ -25,7 +25,8 @@ import {
 import { openCreator } from "../stores/creator";
 import { setSidebarOpen, sidebarOpen } from "../stores/layout";
 import { projectLabel as labelOf } from "../lib/projectLabel";
-import StatusGlyph, { glyphFor, needsYou } from "../ui/StatusGlyph";
+import { needsYou } from "../ui/StatusGlyph";
+import { ProjectIcon, RunnerIcon } from "../ui/EntityIcon";
 import { menuOpen, openMenu, type MenuItem } from "../ui/Menu";
 import { projectMenu, runnerMenu } from "./menus";
 
@@ -127,10 +128,10 @@ function Rail() {
             p.runners.some((r) => r.live && (r.status === "streaming" || r.status === "tool_running"));
           return (
             <span
-              class="font-heading relative flex h-[30px] w-[30px] items-center justify-center rounded-[10px] text-[13px]"
+              class="relative flex h-[30px] w-[30px] items-center justify-center rounded-[10px] text-[11.5px] font-semibold lowercase"
               classList={{
-                "bg-fill-3 text-ink": routeProjectId() === p.id,
-                "bg-fill-1 text-dim": routeProjectId() !== p.id,
+                "bg-fill-2 text-ink": routeProjectId() === p.id,
+                "text-faint": routeProjectId() !== p.id,
               }}
             >
               {labelOf(p).replace(/^[~\\/.]+/, "").slice(0, 2) || "·"}
@@ -152,7 +153,10 @@ function Panel(props: { pinned: boolean }) {
   const projects = createMemo(() => projectsStore.list.filter((p) => !isMasterProject(p)));
 
   return (
-    <aside class="flex h-full w-[232px] flex-col border-r border-line bg-panel">
+    <aside
+      class="flex h-full w-[232px] flex-col border-r border-line"
+      classList={{ "bg-panel": props.pinned, "cx-veil rounded-r-[14px]": !props.pinned }}
+    >
       <div class="flex h-[34px] shrink-0 items-center pl-4 pr-1.5">
         <span class="text-[11.5px] text-faint">Projetos</span>
         <button
@@ -211,15 +215,20 @@ function ProjectRow(props: { project: ProjectUI }) {
   return (
     <div class="mt-1.5 first:mt-0">
       <button
-        class="group flex h-[30px] w-full items-center gap-2 rounded-lg px-2.5 text-left transition hover:bg-fill-2"
-        classList={{ "bg-fill-3": on() }}
+        class="group flex h-[30px] w-full items-center gap-2 rounded-lg px-2.5 text-left transition hover:bg-fill-1"
+        classList={{ "bg-fill-2": on() }}
         onClick={() => focusProject(p().id)}
         onContextMenu={(e) => {
           e.preventDefault();
           openMenu(e, projectMenu(p()));
         }}
       >
-        <span class="font-heading min-w-0 flex-1 truncate text-[14px] text-ink" title={p().folders[0]}>
+        <ProjectIcon size={14} class={on() ? "text-accent" : "text-faint"} />
+        <span
+          class="min-w-0 flex-1 truncate text-[13px] font-medium"
+          classList={{ "text-ink": on() || routeProjectId() === p().id, "text-dim": routeProjectId() !== p().id }}
+          title={p().folders[0]}
+        >
           {projectLabel(p())}
         </span>
         <Show when={waiting() > 0}>
@@ -243,7 +252,7 @@ function ProjectRow(props: { project: ProjectUI }) {
         </span>
       </button>
       <Show when={childrenOf(p()).length > 0}>
-        <div class="ml-[15px] border-l border-line pl-1.5">
+        <div class="ml-[16px] border-l border-line pl-1.5">
           <For each={childrenOf(p())}>{(r) => <ChildRow project={p()} runner={r} />}</For>
         </div>
       </Show>
@@ -257,9 +266,9 @@ function ChildRow(props: { project: ProjectUI; runner: RunnerUI }) {
   const shell = () => r().kind === "shell";
   return (
     <button
-      class="flex h-[26px] w-full items-center gap-2 rounded-md px-2 text-left text-[12.5px] transition hover:bg-fill-2"
+      class="flex h-[26px] w-full items-center gap-2 rounded-md px-2 text-left text-[12.5px] transition hover:bg-fill-1"
       classList={{
-        "bg-fill-3 text-ink": on(),
+        "bg-fill-2 text-ink": on(),
         "text-dim": !on() && !r().unread,
         "text-ink": !on() && r().unread,
       }}
@@ -270,14 +279,7 @@ function ChildRow(props: { project: ProjectUI; runner: RunnerUI }) {
         openMenu(e, runnerMenu(props.project, r()));
       }}
     >
-      <Show when={shell()} fallback={<StatusGlyph glyph={glyphFor(r())} size={12} />}>
-        <span
-          class="font-mono text-[10px]"
-          classList={{ "text-live": r().live, "text-faint": !r().live }}
-        >
-          &gt;_
-        </span>
-      </Show>
+      <RunnerIcon runner={r()} size={13} />
       <span class="min-w-0 flex-1 truncate" classList={{ "font-mono text-[11.5px]": shell() }}>
         {r().name}
       </span>
