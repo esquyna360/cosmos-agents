@@ -5,14 +5,12 @@ import { FolderPlus, GitBranch, X } from "lucide-solid";
 import {
   createProject,
   isMasterProject,
-  newAgent,
   projectsStore,
   workFolder,
 } from "../stores/projects";
-import { openChat, send } from "../stores/chat";
+import { launchAgent } from "../stores/launch";
 import { gitOf, refreshGit } from "../stores/git";
 import { clisList, ensureClisDetected } from "../stores/clis";
-import { isClaudeRunner } from "../lib/projects";
 
 interface Props {
   projectId?: string;
@@ -93,7 +91,7 @@ export default function NewAgentModal(props: Props) {
       if (newFolder()) pid = (await createProject(basenameOf(newFolder()!), [newFolder()!])).id;
       if (!pid) return;
       const picked = cli();
-      const runner = await newAgent({
+      await launchAgent({
         projectId: pid,
         name: name(),
         task: task(),
@@ -101,11 +99,6 @@ export default function NewAgentModal(props: Props) {
         program: picked?.program,
         args: picked?.args,
       });
-      const text = task().trim();
-      if (runner && text && isClaudeRunner(runner) && runner.mode === "chat") {
-        await openChat(runner.id);
-        send(runner.id, text);
-      }
       props.onClose();
     } catch (e) {
       setError(String(e));

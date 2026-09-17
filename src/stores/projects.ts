@@ -33,7 +33,6 @@ import {
   type AgentStatus,
 } from "../lib/ipc";
 import { agentKill } from "../lib/agent";
-import { activeSlot, forgetProject, revealRunner, slotsFor } from "./panes";
 import { fsClaudeMd, fsDetectStack, type StackInfo } from "../lib/fs";
 import { go, pruneTabs, route } from "./nav";
 
@@ -228,8 +227,7 @@ export const focusedRunner = createMemo<RunnerUI | null>(() => {
   if (r.kind !== "session") return null;
   const p = state.list.find((x) => x.id === r.projectId);
   if (!p) return null;
-  const inSlot = slotsFor(p.id)[activeSlot()] ?? null;
-  return p.runners.find((x) => x.id === inSlot) ?? p.runners.find((x) => x.id === r.runnerId) ?? null;
+  return p.runners.find((x) => x.id === r.runnerId) ?? null;
 });
 
 export function focusProject(id: string): void {
@@ -263,7 +261,6 @@ export function isStale(r: RunnerUI): boolean {
  */
 export function focusRunner(projectId: string, runnerId: string): void {
   setFocusedProjectIdSignal(projectId);
-  revealRunner(projectId, runnerId);
   go(
     masterRunner()?.id === runnerId
       ? { kind: "hub" }
@@ -432,7 +429,7 @@ export async function loadProjects(): Promise<void> {
   const r = route();
   if (r.kind === "project" || r.kind === "session") {
     const p = list.find((x) => x.id === r.projectId);
-    if (!p) go({ kind: "crew" });
+    if (!p) go({ kind: "home" });
     else if (r.kind === "session" && !p.runners.some((x) => x.id === r.runnerId))
       go({ kind: "project", projectId: p.id });
   }
@@ -960,7 +957,6 @@ export async function deleteProject(id: string): Promise<void> {
   await projectsDelete(id);
   setState("list", (list) => list.filter((p) => p.id !== id));
   fileStatesByProject.delete(id);
-  forgetProject(id);
   try {
     localStorage.removeItem(editorKey(id));
   } catch {
@@ -968,7 +964,7 @@ export async function deleteProject(id: string): Promise<void> {
   }
   if (focusedProjectIdSignal() === id) setFocusedProjectIdSignal(null);
   const at = route();
-  if ((at.kind === "project" || at.kind === "session") && at.projectId === id) go({ kind: "crew" });
+  if ((at.kind === "project" || at.kind === "session") && at.projectId === id) go({ kind: "home" });
   pruneTabs(state.list.map((p) => p.id));
 }
 

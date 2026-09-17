@@ -45,7 +45,7 @@ export function runnerMenu(project: ProjectUI, r: RunnerUI, editKey?: string): M
     ...(isAgent && r.sessionId && isClaudeRunner(r)
       ? [
           {
-            label: r.mode === "chat" ? "Abrir como terminal" : "Abrir como chat",
+            label: r.mode === "chat" ? "Continuar no terminal do Claude Code" : "Voltar ao chat",
             icon: r.mode === "chat" ? SquareTerminal : MessageSquare,
             hint: "⌘J",
             onSelect: () => void setRunnerMode(r.id, r.mode === "chat" ? "tty" : "chat"),

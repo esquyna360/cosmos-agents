@@ -1,14 +1,13 @@
 import { createSignal } from "solid-js";
 
 /**
- * Where the window is. Three fixed places (Crew, Hub, Board), then whatever
+ * Where the window is. Two fixed places (home, Hub), then whatever
  * project or session is open. Deliberately free of imports from the projects
  * store, so that store can navigate without a cycle.
  */
 export type Route =
-  | { kind: "crew" }
+  | { kind: "home" }
   | { kind: "hub" }
-  | { kind: "board" }
   | { kind: "project"; projectId: string }
   | { kind: "session"; projectId: string; runnerId: string };
 
@@ -22,11 +21,12 @@ const PROJECT_TAB_KEY = "cosmos.projectTab";
 function readRoute(): Route {
   try {
     const v = JSON.parse(localStorage.getItem(ROUTE_KEY) || "null");
+    if (v && (v.kind === "crew" || v.kind === "board")) return { kind: "home" };
     if (v && typeof v.kind === "string") return v as Route;
   } catch {
     /* fall through */
   }
-  return { kind: "crew" };
+  return { kind: "home" };
 }
 
 function readTabs(): string[] {
@@ -81,7 +81,7 @@ export function closeTab(projectId: string): void {
   persist(TABS_KEY, next);
   const r = route();
   if ((r.kind === "project" || r.kind === "session") && r.projectId === projectId)
-    go({ kind: "crew" });
+    go({ kind: "home" });
 }
 
 /** Drops tabs whose project no longer exists. */
@@ -96,4 +96,30 @@ export function pruneTabs(known: string[]): void {
 export function routeProjectId(): string | null {
   const r = route();
   return r.kind === "project" || r.kind === "session" ? r.projectId : null;
+}
+
+/** Projects live either as tabs in the strip or as a list down the side. */
+export type NavMode = "tabs" | "sidebar";
+/** What is listed under each project: nothing, its agents, or terminals too. */
+export type NavChildren = "none" | "agents" | "all";
+
+const NAV_MODE_KEY = "cosmos.nav.mode";
+const NAV_CHILDREN_KEY = "cosmos.nav.children";
+
+const [navMode, setNavModeRaw] = createSignal<NavMode>(
+  localStorage.getItem(NAV_MODE_KEY) === "tabs" ? "tabs" : "sidebar",
+);
+const [navChildren, setNavChildrenRaw] = createSignal<NavChildren>(
+  ((v) => (v === "none" || v === "all" ? v : "agents"))(localStorage.getItem(NAV_CHILDREN_KEY)),
+);
+export { navMode, navChildren };
+
+export function setNavMode(v: NavMode): void {
+  setNavModeRaw(v);
+  localStorage.setItem(NAV_MODE_KEY, v);
+}
+
+export function setNavChildren(v: NavChildren): void {
+  setNavChildrenRaw(v);
+  localStorage.setItem(NAV_CHILDREN_KEY, v);
 }

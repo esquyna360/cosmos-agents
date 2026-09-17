@@ -1,5 +1,5 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
-import { Ellipsis, GitBranch } from "lucide-solid";
+import { ArrowUp, Ellipsis, GitBranch, SlidersHorizontal } from "lucide-solid";
 
 import {
   focusProject,
@@ -12,6 +12,10 @@ import {
   type RunnerUI,
 } from "../stores/projects";
 import { statsOf } from "../stores/chat";
+import { launchAgent } from "../stores/launch";
+import { openCreator } from "../stores/creator";
+import { gitOf } from "../stores/git";
+import { isMasterProject } from "../stores/projects";
 import { branchOf } from "../stores/git";
 import { relativeTime } from "../lib/time";
 import { shortPath } from "../lib/toolDisplay";
@@ -23,9 +27,8 @@ type Kind = "all" | "agent" | "shell";
 
 const COLS = "grid-cols-[minmax(180px,1.6fr)_130px_minmax(150px,1.2fr)_96px_64px_70px_28px]";
 
-/** Everything that exists, one line each. The Crew is for looking; this is
- *  for finding and comparing. */
-export default function BoardView() {
+/** Home: say what you need done, and see everything that already exists. */
+export default function HomeView() {
   const [kind, setKind] = createSignal<Kind>("all");
   const [onlyMine, setOnlyMine] = createSignal(false);
   const [stale, setStale] = createSignal(false);
@@ -50,8 +53,9 @@ export default function BoardView() {
 
   return (
     <div class="flex min-h-0 flex-1 flex-col">
-      <div class="flex shrink-0 flex-wrap items-center gap-1 border-b border-line px-6 py-2.5">
-        <h1 class="font-heading mr-3 text-[19px] text-ink">Board</h1>
+      <QuickAgent />
+      <div class="shrink-0 border-b border-line px-6 py-2">
+      <div class="mx-auto flex max-w-[1080px] flex-wrap items-center gap-1">
         <For each={[["all", "Tudo"], ["agent", "Agentes"], ["shell", "Terminais"]] as [Kind, string][]}>
           {([id, label]) => (
             <button class="cx-pill" data-on={kind() === id} onClick={() => setKind(id)}>
@@ -81,9 +85,10 @@ export default function BoardView() {
           )}
         </For>
       </div>
+      </div>
 
       <div class="min-h-0 flex-1 overflow-auto px-6 pb-10">
-        <div class="min-w-[820px]">
+        <div class="mx-auto min-w-[820px] max-w-[1080px]">
           <div
             class={`sticky top-0 z-10 grid ${COLS} items-center gap-3 border-b border-line bg-void px-2 py-2 text-[11.5px] text-faint`}
           >
@@ -209,6 +214,116 @@ function Row(props: { project: ProjectUI; runner: RunnerUI }) {
       >
         <Ellipsis size={13} />
       </button>
+    </div>
+  );
+}
+
+const LAST_PROJECT_KEY = "cosmos.home.project";
+
+/** The fastest way to put someone to work: type the task, pick the project. */
+function QuickAgent() {
+  const projects = () => projectsStore.list.filter((p) => !isMasterProject(p));
+  const [text, setText] = createSignal("");
+  const [picked, setPicked] = createSignal<string | null>(localStorage.getItem(LAST_PROJECT_KEY));
+  const [worktree, setWorktree] = createSignal(false);
+  const [busy, setBusy] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
+
+  const project = () => projects().find((p) => p.id === picked()) ?? projects()[0] ?? null;
+  const canWorktree = () => (project() ? (gitOf(workFolder(project()!))?.isRepo ?? false) : false);
+
+  function pick(id: string) {
+    setPicked(id);
+    localStorage.setItem(LAST_PROJECT_KEY, id);
+  }
+
+  async function submit() {
+    const p = project();
+    if (!p || busy() || !text().trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await launchAgent({ projectId: p.id, task: text(), worktree: worktree() && canWorktree() });
+      setText("");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div class="shrink-0 px-6 pb-4 pt-6">
+      <div class="mx-auto flex max-w-[1080px] flex-col gap-2.5 rounded-[20px] border border-line-strong bg-raised p-3.5 shadow-cx transition focus-within:border-accent">
+        <textarea
+          rows={2}
+          class="w-full resize-none bg-transparent px-1.5 pt-1 text-[15px] leading-snug text-ink outline-none placeholder:text-faint"
+          placeholder={
+            projects().length === 0
+              ? "Adicione um projeto para colocar um agente para trabalhar"
+              : "O que precisa ser feito? Um agente novo começa por aqui."
+          }
+          disabled={projects().length === 0}
+          value={text()}
+          onInput={(e) => setText(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+              e.preventDefault();
+              void submit();
+            }
+          }}
+        />
+        <div class="flex flex-wrap items-center gap-1">
+          <Show
+            when={projects().length > 0}
+            fallback={
+              <button class="cx-pill cx-pill-line" onClick={() => openCreator({ mode: "project" })}>
+                Adicionar projeto
+              </button>
+            }
+          >
+            <For each={projects()}>
+              {(p) => (
+                <button class="cx-pill cx-pill-line !h-[26px]" data-on={project()?.id === p.id} onClick={() => pick(p.id)}>
+                  {p.name}
+                </button>
+              )}
+            </For>
+          </Show>
+          <div class="ml-auto flex items-center gap-1">
+            <Show when={canWorktree()}>
+              <button
+                class="cx-pill !h-[26px]"
+                data-on={worktree()}
+                title="Cópia isolada do repositório, numa branch só dele"
+                onClick={() => setWorktree(!worktree())}
+              >
+                <GitBranch size={12} />
+                Worktree própria
+              </button>
+            </Show>
+            <button
+              class="cx-icon-btn"
+              title="Mais opções: nome, outra pasta, outro CLI (⌘N)"
+              aria-label="Mais opções"
+              onClick={() => openCreator({ mode: "agent", projectId: project()?.id })}
+            >
+              <SlidersHorizontal size={14} />
+            </button>
+            <button
+              class="cx-btn-primary !h-[30px]"
+              disabled={busy() || !text().trim() || !project()}
+              onClick={() => void submit()}
+            >
+              {busy() ? "Criando…" : "Novo agente"}
+              <ArrowUp size={13} />
+            </button>
+          </div>
+        </div>
+        <Show when={error()}>
+          <p class="px-1.5 text-[12.5px] text-alert">{error()}</p>
+        </Show>
+      </div>
     </div>
   );
 }

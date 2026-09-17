@@ -1,6 +1,5 @@
 import { Show } from "solid-js";
 import {
-  Columns2,
   Ellipsis,
   FolderTree,
   Gauge,
@@ -24,7 +23,6 @@ import {
 import { renameSession, statsOf } from "../stores/chat";
 import { branchOf } from "../stores/git";
 import { inspector, setInspector, type InspectorTab } from "../stores/layout";
-import { toggleSplit } from "../stores/panes";
 import { isClaudeRunner } from "../lib/projects";
 import { shortPath } from "../lib/toolDisplay";
 import { prettyModel } from "./chat/Composer";
@@ -139,21 +137,16 @@ export default function SessionView(props: Props) {
         </div>
 
         <div class="flex shrink-0 items-center gap-1">
-          <Show when={canChat()}>
-            <div class="mr-1 flex rounded-full border border-line p-0.5" role="group" aria-label="Modo da sessão">
-              <ModeButton
-                on={r().mode === "chat"}
-                label="Chat"
-                icon={MessageSquare}
-                onClick={() => void setRunnerMode(r().id, "chat")}
-              />
-              <ModeButton
-                on={r().mode === "tty"}
-                label="Terminal"
-                icon={SquareTerminal}
-                onClick={() => void setRunnerMode(r().id, "tty")}
-              />
-            </div>
+          <Show when={canChat() && r().mode === "tty"}>
+            <button
+              class="cx-pill cx-pill-line"
+              data-on="true"
+              title="Fecha o Claude Code no terminal e reabre esta mesma conversa como chat"
+              onClick={() => void setRunnerMode(r().id, "chat")}
+            >
+              <MessageSquare size={12} />
+              Voltar ao chat
+            </button>
           </Show>
           <button
             class="cx-pill"
@@ -189,10 +182,7 @@ export default function SessionView(props: Props) {
             title="Mais"
             aria-label="Mais ações"
             onClick={(e) =>
-              openMenu(e.currentTarget, [
-                ...runnerMenu(props.project, r(), editKey()),
-                { label: "Dividir a tela", icon: Columns2, hint: "⌘\\", separatorBefore: true, onSelect: toggleSplit },
-              ])
+              openMenu(e.currentTarget, runnerMenu(props.project, r(), editKey()))
             }
           >
             <Ellipsis size={15} />
@@ -201,32 +191,5 @@ export default function SessionView(props: Props) {
       </header>
       <SessionBody project={props.project} runner={r()} />
     </div>
-  );
-}
-
-function ModeButton(props: {
-  on: boolean;
-  label: string;
-  icon: typeof MessageSquare;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      class="flex items-center gap-1.5 rounded-full px-2.5 py-[3px] text-[12px] transition"
-      classList={{
-        "bg-fill-3 text-ink": props.on,
-        "text-faint hover:text-ink": !props.on,
-      }}
-      aria-pressed={props.on}
-      onClick={() => !props.on && props.onClick()}
-      title={
-        props.label === "Terminal"
-          ? "A mesma conversa, no terminal do Claude Code"
-          : "A mesma conversa, como chat"
-      }
-    >
-      <props.icon size={12} />
-      {props.label}
-    </button>
   );
 }

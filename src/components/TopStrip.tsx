@@ -1,15 +1,17 @@
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { ChevronRight, Globe, Moon, Plus, Search, Settings2, Sun, X } from "lucide-solid";
+import { ChevronRight, Globe, ListTree, Moon, Plus, Search, Settings2, Sun, X } from "lucide-solid";
 
 import {
   focusProject,
+  focusRunner,
+  focusedProject,
   focusedRunner,
   isMasterProject,
   masterRunner,
   projectsStore,
   type ProjectUI,
 } from "../stores/projects";
-import { closeTab, go, openTabs, route, routeProjectId } from "../stores/nav";
+import { closeTab, go, navMode, openTabs, route, routeProjectId, setNavMode } from "../stores/nav";
 import { openCreator } from "../stores/creator";
 import { openJump } from "../stores/jump";
 import { setSettingsOpen } from "../stores/layout";
@@ -17,7 +19,9 @@ import { cycleTheme, themeSpec } from "../stores/theme";
 import { webInfo, type WebInfo } from "../lib/remote";
 import { needsYou } from "../ui/StatusGlyph";
 import { openMenu } from "../ui/Menu";
-import { projectMenu } from "./menus";
+import { projectMenu, runnerMenu } from "./menus";
+import { childrenOf, navOptionsMenu } from "./SideNav";
+import StatusGlyph, { glyphFor } from "../ui/StatusGlyph";
 
 /** The one piece of chrome that never changes: three fixed places, the
  *  projects you have open, and where you are inside one. */
@@ -43,14 +47,8 @@ export default function TopStrip() {
       class="flex h-[var(--strip-h)] shrink-0 items-center gap-1 border-b border-line bg-panel pl-[84px] pr-2.5"
     >
       <nav class="flex shrink-0 items-center gap-0.5">
-        <button class="cx-pill" data-on={route().kind === "crew"} onClick={() => go({ kind: "crew" })}>
-          Crew
-        </button>
-        <button class="cx-pill" data-on={route().kind === "hub"} onClick={() => go({ kind: "hub" })}>
-          Hub
-        </button>
-        <button class="cx-pill" data-on={route().kind === "board"} onClick={() => go({ kind: "board" })}>
-          Board
+        <button class="cx-pill" data-on={route().kind === "home"} onClick={() => go({ kind: "home" })}>
+          Início
           <Show when={waiting() > 0}>
             <span
               class="-mr-1 flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-busy px-1 text-[10.5px] font-semibold text-accent-ink"
@@ -60,23 +58,41 @@ export default function TopStrip() {
             </span>
           </Show>
         </button>
+        <button class="cx-pill" data-on={route().kind === "hub"} onClick={() => go({ kind: "hub" })}>
+          Hub
+        </button>
       </nav>
 
-      <Show when={tabs().length > 0}>
+      <Show when={navMode() === "tabs" && tabs().length > 0}>
         <span class="mx-1.5 h-4 w-px shrink-0 bg-line-strong" />
       </Show>
 
-      <div class="flex min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]">
-        <For each={tabs()}>{(p) => <ProjectTabPill project={p} />}</For>
-      </div>
-      <button
-        class="cx-icon-btn shrink-0"
-        title="Adicionar projeto (⌘T)"
-        aria-label="Adicionar projeto"
-        onClick={() => openCreator({ mode: "project" })}
-      >
-        <Plus size={14} />
-      </button>
+      <Show when={navMode() === "tabs"}>
+        <div class="flex min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]">
+          <For each={tabs()}>{(p) => <ProjectTabPill project={p} />}</For>
+        </div>
+        <button
+          class="cx-icon-btn shrink-0"
+          title="Adicionar projeto (⌘T)"
+          aria-label="Adicionar projeto"
+          onClick={() => openCreator({ mode: "project" })}
+        >
+          <Plus size={14} />
+        </button>
+        <button
+          class="cx-icon-btn shrink-0"
+          title="O que aparece nas abas"
+          aria-label="O que aparece nas abas"
+          onClick={(e) =>
+            openMenu(e.currentTarget, [
+              ...navOptionsMenu(),
+              { label: "Usar barra lateral", hint: "⌘B", separatorBefore: true, onSelect: () => setNavMode("sidebar") },
+            ])
+          }
+        >
+          <ListTree size={13} />
+        </button>
+      </Show>
 
       <Show when={crumb()}>
         {(r) => (
@@ -182,6 +198,38 @@ function Remote() {
       >
         <Globe size={14} class={copied() || online() ? "text-live" : ""} />
       </button>
+    </Show>
+  );
+}
+
+/** Tabs mode only: the open project's agents (and terminals) as a second row. */
+export function ChildStrip() {
+  const project = () => (navMode() === "tabs" && routeProjectId() ? focusedProject() : null);
+  return (
+    <Show when={project() && childrenOf(project()!).length > 0}>
+      <div class="flex h-[34px] shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line bg-panel px-3 [scrollbar-width:none]">
+        <For each={childrenOf(project()!)}>
+          {(r) => (
+            <button
+              class="cx-pill !h-[24px] !text-[12px]"
+              classList={{ "font-mono !text-[11.5px]": r.kind === "shell" }}
+              data-on={focusedRunner()?.id === r.id}
+              onClick={() => focusRunner(project()!.id, r.id)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                openMenu(e, runnerMenu(project()!, r));
+              }}
+            >
+              <Show when={r.kind === "shell"} fallback={<StatusGlyph glyph={glyphFor(r)} size={11} />}>
+                <span class="text-[10px]" classList={{ "text-live": r.live, "text-faint": !r.live }}>
+                  &gt;_
+                </span>
+              </Show>
+              <span class="max-w-[180px] truncate">{r.name}</span>
+            </button>
+          )}
+        </For>
+      </div>
     </Show>
   );
 }

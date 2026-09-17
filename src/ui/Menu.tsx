@@ -1,5 +1,6 @@
 import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
+import { Check } from "lucide-solid";
 
 export interface MenuItem {
   label: string;
@@ -7,6 +8,8 @@ export interface MenuItem {
   icon?: (p: { size?: number }) => JSX.Element;
   danger?: boolean;
   disabled?: boolean;
+  /** Marks the current choice in a pick-one group. */
+  checked?: boolean;
   separatorBefore?: boolean;
   onSelect: () => void;
 }
@@ -97,6 +100,9 @@ export function MenuHost() {
                     </span>
                   </Show>
                   <span class="min-w-0 flex-1 truncate">{item.label}</span>
+                  <Show when={item.checked}>
+                    <Check size={12} class="shrink-0 text-accent" />
+                  </Show>
                   <Show when={item.hint}>
                     <span class="shrink-0 text-[11px] text-faint">{item.hint}</span>
                   </Show>

@@ -12,12 +12,13 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
 - **Projects** with 1..6 working folders. Each project lives at
   `~/.cosmos/projects/<slug>/`. Sticky slug = filesystem handle that doesn't
   move on rename. Names are unique (case-insensitive).
-- **Crew, Hub, Board** — a top strip replaces the sidebar. *Crew* is home:
-  one section per project, agents as cards, terminals as dark mono slabs,
-  anything stopped for 3+ days folded away. *Hub* is the `geral` agent, the
-  one that drives the `cosmos` CLI for you. *Board* is every agent and
-  terminal as one compact table with filters, context, cost and last
-  activity. Opening a project pins it as a tab; `⌘K` jumps anywhere.
+- **Home and Hub** — home is a compact board of every agent and terminal
+  grouped by project (filters, context, cost, last activity) under a
+  composer: type the task, pick the project, get an agent. *Hub* is the
+  `geral` agent, the one that drives the `cosmos` CLI for you.
+- **Projects nav** — a sidebar or tabs in the top strip (`⌘B` switches),
+  listing only projects, projects with agents, or agents and terminals.
+  Anything stopped for 3+ days is folded away. `⌘K` jumps anywhere.
 - **New agent** (`⌘N`) — where, an optional task (sent as the first
   message), a name, and *main* or its *own worktree*
   (`~/.cosmos/worktrees/<slug>/<name>` on branch `cosmos/<name>`). The
@@ -55,11 +56,6 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
   the parts of VS Code that matter without extensions: search/replace
   (`⌘F`), autocompletion, code folding, indent guides, multi-cursor,
   bracket matching, breadcrumbs, a Ln/Col status bar and ~25 languages.
-- **Pane grid** — the main area is a grid of 1..4 panes: single, side by
-  side, stacked, quadrants, or main + 2. Each slot holds any runner of the
-  focused project and the assignment is remembered per project. A PTY is
-  attached in exactly one slot, so the grid de-dupes and back-fills as
-  runners come and go.
 - **Revivable sessions** — every agent runner owns a Claude session UUID.
   First boot pins it with `--session-id`; later boots `--resume` it when the
   transcript exists under `~/.claude/projects/`. Stopping a runner or
@@ -103,10 +99,8 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
 | `⌘W` | stop the focused runner (keeps it — click to resume) |
 | `⌘⇧W` | stop every runner of the project |
 | `⌘1–9` | focus N-th project |
-| `⌘⌥1–5` | pane layout: single / side by side / stacked / quadrants / main + 2 |
-| `⌃1–4` | focus N-th pane |
-| `⌘\` | toggle split (single ↔ side by side) |
-| `⌘0` / `⌘B` / `⌘⇧H` | Crew / Board / Hub |
+| `⌘0` / `⌘⇧H` | home / Hub |
+| `⌘B` | projects as sidebar ↔ tabs |
 | `⌘E` | project tools (overview → files → diff → memory → browser) |
 | `⌘P` / `⌘⇧F` | file palette / grep |
 | `⌘,` | settings |

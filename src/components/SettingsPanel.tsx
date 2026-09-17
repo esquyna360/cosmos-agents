@@ -1,3 +1,4 @@
+import { navChildren, navMode, setNavChildren, setNavMode } from "../stores/nav";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import {
   Check,
@@ -87,6 +88,7 @@ export default function SettingsPanel() {
 
         <div class="min-h-0 flex-1 overflow-y-auto p-4">
           <Show when={tab() === "aparencia"}>
+            <NavSection />
             <ThemeSection />
           </Show>
           <Show when={tab() === "atalhos"}>
@@ -105,6 +107,28 @@ export default function SettingsPanel() {
 }
 
 /* ------------------------------- aparência ------------------------------ */
+
+function NavSection() {
+  const Pick = (props: { on: boolean; label: string; onClick: () => void }) => (
+    <button class="cx-pill cx-pill-line" data-on={props.on} onClick={props.onClick}>
+      {props.label}
+    </button>
+  );
+  return (
+    <section class="mb-6 flex flex-col gap-2.5">
+      <SectionTitle icon={Palette} title="navegação" hint="⌘B alterna" />
+      <div class="flex flex-wrap gap-1.5">
+        <Pick on={navMode() === "sidebar"} label="Barra lateral" onClick={() => setNavMode("sidebar")} />
+        <Pick on={navMode() === "tabs"} label="Abas no topo" onClick={() => setNavMode("tabs")} />
+      </div>
+      <div class="flex flex-wrap gap-1.5">
+        <Pick on={navChildren() === "none"} label="Só projetos" onClick={() => setNavChildren("none")} />
+        <Pick on={navChildren() === "agents"} label="Com agentes" onClick={() => setNavChildren("agents")} />
+        <Pick on={navChildren() === "all"} label="Com agentes e terminais" onClick={() => setNavChildren("all")} />
+      </div>
+    </section>
+  );
+}
 
 function ThemeSection() {
   return (
@@ -180,8 +204,8 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
   {
     title: "janela",
     items: [
-      ["⌘0", "Crew"],
-      ["⌘B", "Board"],
+      ["⌘0", "início"],
+      ["⌘B", "barra lateral ou abas"],
       ["⌘⇧H", "Hub"],
       ["⌘N", "novo agente"],
       ["⌘,", "configurações"],
@@ -191,11 +215,8 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
     ],
   },
   {
-    title: "painéis",
+    title: "projetos",
     items: [
-      ["⌘\\", "dividir em dois"],
-      ["⌘⌥1–5", "layout do grid"],
-      ["⌃1–4", "focar painel"],
       ["⌘1–9", "trocar de projeto"],
     ],
   },

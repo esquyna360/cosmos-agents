@@ -13,15 +13,14 @@ import {
 } from "@tauri-apps/plugin-notification";
 import { MessageSquare, SquareTerminal } from "lucide-solid";
 
-import TopStrip from "./components/TopStrip";
-import CrewView from "./components/CrewView";
+import TopStrip, { ChildStrip } from "./components/TopStrip";
 import HubView from "./components/HubView";
-import BoardView from "./components/BoardView";
+import HomeView from "./components/HomeView";
+import SideNav from "./components/SideNav";
 import ProjectView from "./components/ProjectView";
 import NewAgentModal from "./components/NewAgentModal";
 import AddProjectModal from "./components/AddProjectModal";
 import { DeleteProjectDialog } from "./components/menus";
-import PaneGrid from "./components/PaneGrid";
 import SessionView from "./components/SessionView";
 import Inspector from "./components/Inspector";
 import JumpPalette from "./components/JumpPalette";
@@ -49,20 +48,22 @@ import {
 } from "./stores/projects";
 import { attachChatListeners } from "./stores/chat";
 import { jumpOpen, openJump } from "./stores/jump";
-import { go, projectTab, route, routeProjectId, setProjectTab, type ProjectTab } from "./stores/nav";
+import {
+  go,
+  navMode,
+  projectTab,
+  route,
+  routeProjectId,
+  setNavMode,
+  setProjectTab,
+  type ProjectTab,
+} from "./stores/nav";
 import { startGitWatch } from "./stores/git";
 import {
   inspector,
   settingsOpen,
   toggleSettings,
 } from "./stores/layout";
-import {
-  LAYOUTS,
-  layout,
-  setActiveSlot,
-  setLayout,
-  toggleSplit,
-} from "./stores/panes";
 import { cycleTheme, initTheme } from "./stores/theme";
 import { startUpdateWatch } from "./stores/updates";
 import { ptyLiveIds, type AgentStatus } from "./lib/ipc";
@@ -134,23 +135,8 @@ export default function App() {
     });
 
     const onKey = (e: KeyboardEvent) => {
-      // ⌃1–4 focuses a pane. Kept off ⌘ so ⌘1–9 stays on projects.
-      if (e.ctrlKey && !e.metaKey && /^[1-4]$/.test(e.key)) {
-        e.preventDefault();
-        setActiveSlot(parseInt(e.key, 10) - 1);
-        return;
-      }
       if (!e.metaKey) return;
       const key = e.key.toLowerCase();
-      // ⌘⌥1–5 switches the grid layout.
-      if (e.altKey && /^[1-9]$/.test(e.code.replace("Digit", ""))) {
-        const n = parseInt(e.code.replace("Digit", ""), 10);
-        if (n >= 1 && n <= LAYOUTS.length) {
-          e.preventDefault();
-          setLayout(LAYOUTS[n - 1].id);
-          return;
-        }
-      }
       if (e.key === ",") {
         e.preventDefault();
         toggleSettings();
@@ -158,7 +144,7 @@ export default function App() {
       }
       if (key === "b") {
         e.preventDefault();
-        go({ kind: route().kind === "board" ? "crew" : "board" });
+        setNavMode(navMode() === "sidebar" ? "tabs" : "sidebar");
         return;
       }
       if (key === "h" && e.shiftKey) {
@@ -168,7 +154,7 @@ export default function App() {
       }
       if (e.key === "0") {
         e.preventDefault();
-        go({ kind: "crew" });
+        go({ kind: "home" });
         return;
       }
       if (key === "t" && e.shiftKey) {
@@ -236,11 +222,6 @@ export default function App() {
         if (focusedProject()) setPalette("grep");
         return;
       }
-      if (e.key === "\\") {
-        e.preventDefault();
-        toggleSplit();
-        return;
-      }
       if (/^[1-9]$/.test(e.key)) {
         e.preventDefault();
         focusByProjectIndex(parseInt(e.key, 10) - 1);
@@ -259,16 +240,18 @@ export default function App() {
   return (
     <div class="flex h-screen w-screen flex-col overflow-hidden bg-void text-ink">
       <TopStrip />
+      <ChildStrip />
 
+      <div class="flex min-h-0 flex-1">
+      <Show when={navMode() === "sidebar"}>
+        <SideNav />
+      </Show>
       <main class="relative flex min-h-0 min-w-0 flex-1 flex-col bg-void">
-          <Show when={route().kind === "crew"}>
-            <CrewView />
+          <Show when={route().kind === "home"}>
+            <HomeView />
           </Show>
           <Show when={route().kind === "hub"}>
             <HubView />
-          </Show>
-          <Show when={route().kind === "board"}>
-            <BoardView />
           </Show>
           <Show when={route().kind === "project" && focusedProject()} keyed>
             {(p) => <ProjectView project={p} />}
@@ -276,17 +259,8 @@ export default function App() {
           <Show when={route().kind === "session" && focusedProject()} keyed>
             {(p) => (
               <div class="flex min-h-0 min-w-0 flex-1">
-                <Show
-                  when={layout() === "single"}
-                  fallback={
-                    <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-                      <PaneGrid project={p} />
-                    </div>
-                  }
-                >
-                  <Show when={focusedRunner()} fallback={<NoSession project={p} />}>
-                    {(r) => <SessionView project={p} runner={r()} />}
-                  </Show>
+                <Show when={focusedRunner()} fallback={<NoSession project={p} />}>
+                  {(r) => <SessionView project={p} runner={r()} />}
                 </Show>
                 <Show when={inspector()}>
                   <Inspector project={p} runner={focusedRunner()} />
@@ -299,6 +273,7 @@ export default function App() {
             <CommandPalette mode={palette()!} roots={roots()} onClose={() => setPalette(null)} />
           </Show>
       </main>
+      </div>
 
       <Show when={creator()} keyed>
         {(c) => (

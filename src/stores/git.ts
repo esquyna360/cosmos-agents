@@ -1,4 +1,4 @@
-import { createSignal } from "solid-js";
+import { createEffect, createRoot, createSignal, on } from "solid-js";
 
 import { gitInfo, type GitInfo } from "../lib/projects";
 import { projectsStore, workFolder, type ProjectUI } from "./projects";
@@ -34,7 +34,9 @@ let timer: number | undefined;
 
 export function startGitWatch(): void {
   if (timer) return;
-  void refreshGit();
+  createRoot(() =>
+    createEffect(on(() => projectsStore.list.map((p) => p.runners.length).join(), () => void refreshGit())),
+  );
   timer = window.setInterval(() => {
     if (document.hasFocus()) void refreshGit();
   }, 20_000);
