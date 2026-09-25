@@ -25,27 +25,27 @@ const PROJECTS = [
     id: "p-metamorfosis",
     name: "Metamorfosis",
     slug: "metamorfosis",
-    folders: ["/Users/bruno/code/metamorfosis-root/repos/metamorfosis_flutter"],
+    folders: ["/Users/bruno/code/apps/metamorfosis/repos/metamorfosis_flutter"],
     memory: "Flutter + Firebase. Release pela Codemagic.",
-    cwd: "/Users/bruno/code/metamorfosis-root/repos/metamorfosis_flutter",
+    cwd: "/Users/bruno/code/apps/metamorfosis/repos/metamorfosis_flutter",
     created_at: now - 86_400 * 40,
   },
   {
     id: "p-cosmos",
     name: "Cosmos",
     slug: "cosmos",
-    folders: ["/Users/bruno/code/cosmos-agents", "/Users/bruno/code/.dev-logs"],
+    folders: ["/Users/bruno/code/tools/cosmos-agents", "/Users/bruno/code/.dev-logs"],
     memory: "",
-    cwd: "/Users/bruno/code/cosmos-agents",
+    cwd: "/Users/bruno/code/tools/cosmos-agents",
     created_at: now - 86_400 * 12,
   },
   {
     id: "p-iquit",
     name: "iQuit",
     slug: "iquit",
-    folders: ["/Users/bruno/code/iquit"],
+    folders: ["/Users/bruno/code/apps/iquit/iquit"],
     memory: "",
-    cwd: "/Users/bruno/code/iquit",
+    cwd: "/Users/bruno/code/apps/iquit/iquit",
     created_at: now - 86_400 * 90,
   },
 ];
@@ -96,7 +96,7 @@ const STATUSES: Record<string, string> = {
   r5: "running",
 };
 
-const ROOT = "/Users/bruno/code/cosmos-agents";
+const ROOT = "/Users/bruno/code/tools/cosmos-agents";
 const j = (v: unknown) => JSON.stringify(v);
 const asst = (id: string, content: unknown[]) =>
   j({ type: "assistant", uuid: id, message: { id, model: "claude-opus-5", content, usage: { input_tokens: 4200, cache_read_input_tokens: 61000 } } });
@@ -177,19 +177,19 @@ const BANNER = [
 ].join("\r\n");
 
 const TREE: Record<string, string[]> = {
-  "/Users/bruno/code/metamorfosis-root/repos/metamorfosis_flutter": [
+  "/Users/bruno/code/apps/metamorfosis/repos/metamorfosis_flutter": [
     "lib",
     "test",
     "pubspec.yaml",
     "README.md",
   ],
-  "/Users/bruno/code/metamorfosis-root/repos/metamorfosis_flutter/lib": [
+  "/Users/bruno/code/apps/metamorfosis/repos/metamorfosis_flutter/lib": [
     "main.dart",
     "app_router.ts",
     "theme.css",
   ],
-  "/Users/bruno/code/cosmos-agents": ["src", "src-tauri", "package.json"],
-  "/Users/bruno/code/cosmos-agents/src": ["App.tsx", "index.tsx", "styles.css"],
+  "/Users/bruno/code/tools/cosmos-agents": ["src", "src-tauri", "package.json"],
+  "/Users/bruno/code/tools/cosmos-agents/src": ["App.tsx", "index.tsx", "styles.css"],
 };
 
 function SAMPLE(path: string): string {
