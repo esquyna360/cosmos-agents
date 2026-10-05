@@ -743,6 +743,8 @@ export async function newAgent(opts: {
   worktree?: boolean;
   program?: string;
   args?: string[];
+  model?: string;
+  provider?: string;
 }): Promise<RunnerUI | null> {
   const project = state.list.find((p) => p.id === opts.projectId);
   if (!project) return null;
@@ -759,6 +761,8 @@ export async function newAgent(opts: {
     nameAuto: asChat && !typed,
     task: opts.task?.trim(),
     worktree: opts.worktree,
+    model: opts.model,
+    provider: opts.provider,
   });
   const ui = runnerToUI(runner, false);
   // A terminal agent gets its task as Claude Code's opening prompt. Spawned

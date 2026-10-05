@@ -1,6 +1,6 @@
 import { projectLabel } from "../lib/projectLabel";
 import { createMemo, createSignal, For, Show } from "solid-js";
-import { ArrowUp, Ellipsis, GitBranch, SlidersHorizontal } from "lucide-solid";
+import { ArrowUp, CornerDownRight, Ellipsis, GitBranch, SlidersHorizontal, Waypoints } from "lucide-solid";
 
 import {
   focusProject,
@@ -19,6 +19,11 @@ import { gitOf } from "../stores/git";
 import { isMasterProject } from "../stores/projects";
 import { branchOf } from "../stores/git";
 import { relativeTime } from "../lib/time";
+import { runnerSend, type Suggestion } from "../lib/hub";
+import { AUTO, ensureModels, modelLabel, TIER_HINT, type ModelChoice } from "../stores/models";
+import { useRoutePreview } from "../stores/routePreview";
+import { go } from "../stores/nav";
+import ModelPicker from "../ui/ModelPicker";
 import { shortPath } from "../lib/toolDisplay";
 import { needsYou, stateOf, TONE_TEXT } from "../ui/StatusGlyph";
 import { ProjectIcon, RunnerIcon } from "../ui/EntityIcon";
@@ -27,7 +32,7 @@ import { projectMenu, runnerMenu } from "./menus";
 
 type Kind = "all" | "agent" | "shell";
 
-const COLS = "grid-cols-[minmax(180px,1.6fr)_130px_minmax(150px,1.2fr)_96px_64px_70px_28px]";
+const COLS = "grid-cols-[minmax(180px,1.6fr)_130px_minmax(140px,1.1fr)_104px_96px_64px_70px_28px]";
 
 /** Home: say what you need done, and see everything that already exists. */
 export default function HomeView() {
@@ -35,6 +40,7 @@ export default function HomeView() {
   const [onlyMine, setOnlyMine] = createSignal(false);
   const [stale, setStale] = createSignal(false);
   const [projectId, setProjectId] = createSignal<string | null>(null);
+  ensureModels();
 
   const keep = (r: RunnerUI) =>
     r.id !== masterRunner()?.id &&
@@ -90,13 +96,14 @@ export default function HomeView() {
       </div>
 
       <div class="min-h-0 flex-1 overflow-auto px-6 pb-10">
-        <div class="mx-auto min-w-[820px] max-w-[1080px]">
+        <div class="mx-auto min-w-[900px] max-w-[1080px]">
           <div
             class={`sticky top-0 z-10 grid ${COLS} items-center gap-3 border-b border-line bg-void px-2 py-2 text-[11.5px] text-faint`}
           >
             <span>Nome</span>
             <span>Estado</span>
             <span>Onde</span>
+            <span>Modelo</span>
             <span>Contexto</span>
             <span class="text-right">Custo</span>
             <span class="text-right">Última</span>
@@ -181,6 +188,11 @@ function Row(props: { project: ProjectUI; runner: RunnerUI }) {
           <span class="truncate">{shortPath(workFolder(props.project, r()), [])}</span>
         </Show>
       </span>
+      <span class="truncate text-[11.5px] text-dim">
+        <Show when={!shell() && modelLabel(r())} fallback={<span class="text-faint">–</span>}>
+          {modelLabel(r())}
+        </Show>
+      </span>
       <span class="flex items-center gap-1.5">
         <Show when={pct() !== null} fallback={<span class="text-faint">–</span>}>
           <span class="h-1 flex-1 overflow-hidden rounded-full bg-fill-2">
@@ -211,32 +223,54 @@ function Row(props: { project: ProjectUI; runner: RunnerUI }) {
   );
 }
 
-const LAST_PROJECT_KEY = "cosmos.home.project";
+const TARGET_KEY = "cosmos.home.target";
+const HUB = "hub";
 
-/** The fastest way to put someone to work: type the task, pick the project. */
+const ACTION_LABEL: Record<Suggestion["action"], string> = {
+  send: "Vai para",
+  spawn: "Agente novo em",
+  self: "O Hub resolve",
+};
+
+/** Say what you need. The Hub decides who does it, or you pick the project. */
 function QuickAgent() {
   const projects = () => projectsStore.list.filter((p) => !isMasterProject(p));
   const [text, setText] = createSignal("");
-  const [picked, setPicked] = createSignal<string | null>(localStorage.getItem(LAST_PROJECT_KEY));
+  const [picked, setPicked] = createSignal<string>(localStorage.getItem(TARGET_KEY) ?? HUB);
   const [worktree, setWorktree] = createSignal(false);
+  const [model, setModel] = createSignal<ModelChoice>(AUTO);
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  const preview = useRoutePreview(text);
 
-  const project = () => projects().find((p) => p.id === picked()) ?? projects()[0] ?? null;
+  const project = () => projects().find((p) => p.id === picked()) ?? null;
+  const toHub = () => !project() && Boolean(masterRunner());
   const canWorktree = () => (project() ? (gitOf(workFolder(project()!))?.isRepo ?? false) : false);
+  const ready = () => text().trim().length > 0 && (toHub() || Boolean(project()));
 
   function pick(id: string) {
     setPicked(id);
-    localStorage.setItem(LAST_PROJECT_KEY, id);
+    localStorage.setItem(TARGET_KEY, id);
   }
 
   async function submit() {
-    const p = project();
-    if (!p || busy() || !text().trim()) return;
+    if (busy() || !ready()) return;
     setBusy(true);
     setError(null);
     try {
-      await launchAgent({ projectId: p.id, task: text(), worktree: worktree() && canWorktree() });
+      const p = project();
+      if (p) {
+        await launchAgent({
+          projectId: p.id,
+          task: text(),
+          worktree: worktree() && canWorktree(),
+          model: model().model || undefined,
+          provider: model().provider || undefined,
+        });
+      } else {
+        await runnerSend(masterRunner()!.id, text());
+        go({ kind: "hub" });
+      }
       setText("");
     } catch (e) {
       setError(String(e));
@@ -252,11 +286,10 @@ function QuickAgent() {
           rows={2}
           class="w-full resize-none bg-transparent px-1.5 pt-1 text-[15px] leading-snug text-ink outline-none placeholder:text-faint"
           placeholder={
-            projects().length === 0
-              ? "Adicione um projeto para colocar um agente para trabalhar"
+            toHub()
+              ? "O que precisa ser feito? O Hub decide quem faz e em qual modelo."
               : "O que precisa ser feito? Um agente novo começa por aqui."
           }
-          disabled={projects().length === 0}
           value={text()}
           onInput={(e) => setText(e.currentTarget.value)}
           onKeyDown={(e) => {
@@ -266,24 +299,31 @@ function QuickAgent() {
             }
           }}
         />
+        <Show when={toHub() && preview()}>{(s) => <RoutePreview suggestion={s()} />}</Show>
         <div class="flex flex-wrap items-center gap-1">
-          <Show
-            when={projects().length > 0}
-            fallback={
-              <button class="cx-pill cx-pill-line" onClick={() => openCreator({ mode: "project" })}>
-                Adicionar projeto
+          <Show when={masterRunner()}>
+            <button class="cx-pill cx-pill-line !h-[26px]" data-on={toHub()} onClick={() => pick(HUB)}>
+              <Waypoints size={12} />
+              Hub decide
+            </button>
+            <span class="mx-1 h-4 w-px bg-line-strong" />
+          </Show>
+          <For each={projects()}>
+            {(p) => (
+              <button class="cx-pill cx-pill-line !h-[26px]" data-on={project()?.id === p.id} onClick={() => pick(p.id)}>
+                {projectLabel(p)}
               </button>
-            }
-          >
-            <For each={projects()}>
-              {(p) => (
-                <button class="cx-pill cx-pill-line !h-[26px]" data-on={project()?.id === p.id} onClick={() => pick(p.id)}>
-                  {projectLabel(p)}
-                </button>
-              )}
-            </For>
+            )}
+          </For>
+          <Show when={projects().length === 0}>
+            <button class="cx-pill cx-pill-line !h-[26px]" onClick={() => openCreator({ mode: "project" })}>
+              Adicionar projeto
+            </button>
           </Show>
           <div class="ml-auto flex items-center gap-1">
+            <Show when={project()}>
+              <ModelPicker compact value={model()} onChange={setModel} auto={preview()?.model.label} />
+            </Show>
             <Show when={canWorktree()}>
               <button
                 class="cx-pill !h-[26px]"
@@ -303,12 +343,8 @@ function QuickAgent() {
             >
               <SlidersHorizontal size={14} />
             </button>
-            <button
-              class="cx-btn-primary !h-[30px]"
-              disabled={busy() || !text().trim() || !project()}
-              onClick={() => void submit()}
-            >
-              {busy() ? "Criando…" : "Novo agente"}
+            <button class="cx-btn-primary !h-[30px]" disabled={busy() || !ready()} onClick={() => void submit()}>
+              {busy() ? "Enviando…" : toHub() ? "Pedir ao Hub" : "Novo agente"}
               <ArrowUp size={13} />
             </button>
           </div>
@@ -317,6 +353,39 @@ function QuickAgent() {
           <p class="px-1.5 text-[12.5px] text-alert">{error()}</p>
         </Show>
       </div>
+    </div>
+  );
+}
+
+/** Where the router would send what is being typed. The Hub has the last word. */
+function RoutePreview(props: { suggestion: Suggestion }) {
+  const s = () => props.suggestion;
+  const best = () => s().candidates[0];
+  return (
+    <div class="cx-route flex min-w-0 items-center gap-2 rounded-[12px] bg-fill-1 px-2.5 py-1.5 text-[12px]">
+      <CornerDownRight size={13} class="shrink-0 text-accent" />
+      <span class="shrink-0 text-dim">{ACTION_LABEL[s().action]}</span>
+      <Show when={best()}>
+        {(c) => (
+          <>
+            <span class="shrink-0 font-medium text-ink">
+              {s().action === "send" ? c().runnerName : c().projectName}
+            </span>
+            <Show when={s().action === "send"}>
+              <span class="shrink-0 text-faint">em {c().projectName}</span>
+            </Show>
+            <span class="truncate text-faint">· {c().reasons.join(" · ")}</span>
+          </>
+        )}
+      </Show>
+      <Show when={!best()}>
+        <span class="truncate text-faint">nenhum projeto bate com o pedido</span>
+      </Show>
+      <Show when={s().action !== "send"}>
+        <span class="ml-auto shrink-0 rounded-full bg-fill-2 px-2 py-0.5 text-[11px] text-dim" title={s().model.reason}>
+          {s().model.label} · {TIER_HINT[s().model.tier]}
+        </span>
+      </Show>
     </div>
   );
 }

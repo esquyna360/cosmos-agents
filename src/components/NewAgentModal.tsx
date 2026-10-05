@@ -12,6 +12,10 @@ import {
 import { launchAgent } from "../stores/launch";
 import { gitOf, refreshGit } from "../stores/git";
 import { clisList, ensureClisDetected } from "../stores/clis";
+import { AUTO, type ModelChoice } from "../stores/models";
+import { useRoutePreview } from "../stores/routePreview";
+import { isClaudeRunner } from "../lib/projects";
+import ModelPicker from "../ui/ModelPicker";
 
 interface Props {
   projectId?: string;
@@ -38,6 +42,8 @@ export default function NewAgentModal(props: Props) {
   const [name, setName] = createSignal("");
   const [worktree, setWorktree] = createSignal(false);
   const [cliId, setCliId] = createSignal<string | null>(null);
+  const [model, setModel] = createSignal<ModelChoice>(AUTO);
+  const preview = useRoutePreview(task);
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   let taskRef: HTMLTextAreaElement | undefined;
@@ -58,12 +64,15 @@ export default function NewAgentModal(props: Props) {
   });
   const canWorktree = () => isRepo() && !newFolder();
   const where = () => newFolder() ?? (project() ? workFolder(project()!) : null);
+  const takesModel = () => !cli() || isClaudeRunner({ kind: "agent", args: cli()!.args });
+  const effective = (): ModelChoice => (model().model ? model() : (preview()?.model ?? AUTO));
 
   const command = () => {
     const parts = ["cosmos runner add", `--project ${shellQuote(project()?.slug ?? basenameOf(newFolder() ?? "."))}`];
     parts.push(`--name ${shellQuote(name().trim() || derivedName() || "Nova sessão")}`);
     if (task().trim()) parts.push(`--task ${shellQuote(task().trim())}`);
     if (worktree() && canWorktree()) parts.push("--worktree");
+    if (takesModel() && effective().model) parts.push(`--model ${effective().model}`);
     return parts.join(" ");
   };
 
@@ -100,6 +109,8 @@ export default function NewAgentModal(props: Props) {
         worktree: worktree() && canWorktree(),
         program: picked?.program,
         args: picked?.args,
+        model: takesModel() ? effective().model : undefined,
+        provider: takesModel() ? effective().provider : undefined,
       });
       props.onClose();
     } catch (e) {
@@ -198,6 +209,14 @@ export default function NewAgentModal(props: Props) {
             />
           </div>
         </Field>
+
+        <Show when={takesModel()}>
+          <Field label="Modelo" hint={model().model ? undefined : preview()?.model.reason}>
+            <div class="flex">
+              <ModelPicker value={model()} onChange={setModel} auto={preview()?.model.label} />
+            </div>
+          </Field>
+        </Show>
 
         <Show when={clis().length > 1}>
           <Field label="Quem">

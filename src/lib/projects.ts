@@ -47,6 +47,12 @@ export interface Runner {
   branch: string;
   /// What it was asked to do when it was created.
   task: string;
+  /// `--model` it starts with. Empty means the CLI's default.
+  model: string;
+  /// Provider id. Empty means Anthropic.
+  provider: string;
+  /// The runner that delegated this one, if an agent did.
+  parentId: string;
 }
 
 interface ProjectSnake {
@@ -76,6 +82,9 @@ interface RunnerSnake {
   cwd?: string;
   branch?: string;
   task?: string;
+  model?: string;
+  provider?: string;
+  parent_id?: string;
 }
 
 function projectFromSnake(r: ProjectSnake): Project {
@@ -108,6 +117,9 @@ function runnerFromSnake(r: RunnerSnake): Runner {
     cwd: r.cwd ?? "",
     branch: r.branch ?? "",
     task: r.task ?? "",
+    model: r.model ?? "",
+    provider: r.provider ?? "",
+    parentId: r.parent_id ?? "",
   };
 }
 
@@ -157,6 +169,8 @@ export async function runnersCreate(opts: {
   task?: string;
   /// Make a git worktree off the project's first folder and run there.
   worktree?: boolean;
+  model?: string;
+  provider?: string;
 }): Promise<Runner> {
   const r = await invoke<RunnerSnake>("runners_create", {
     mode: opts.mode ?? null,
@@ -170,6 +184,8 @@ export async function runnersCreate(opts: {
     cwd: opts.cwd ?? null,
     task: opts.task ?? null,
     worktree: opts.worktree ?? false,
+    model: opts.model ?? null,
+    provider: opts.provider ?? null,
   });
   return runnerFromSnake(r);
 }

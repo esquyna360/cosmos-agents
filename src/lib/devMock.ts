@@ -86,6 +86,9 @@ const RUNNERS = (
   session_id: kind === "agent" ? `sess-${id}` : "",
   mode: kind === "agent" && id !== "r1" ? "chat" : "tty",
   name_auto: id === "r7",
+  model: ({ r1: "opus", r3: "sonnet", r4: "sonnet", r6: "deepseek-flash", r8: "haiku" } as Record<string, string>)[id] ?? "",
+  provider: id === "r6" ? "deepseek" : "",
+  parent_id: id === "r3" || id === "r6" ? "r0" : "",
 }));
 
 const STATUSES: Record<string, string> = {
@@ -288,6 +291,48 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
     tunnel_running: true,
     cloudflared_present: true,
   }),
+  models_list: () => [
+    {
+      id: "anthropic", name: "Anthropic", base_url: "", key_file: "", available: true,
+      models: [
+        { id: "opus", label: "Opus", tier: "deep" },
+        { id: "sonnet", label: "Sonnet", tier: "work" },
+        { id: "haiku", label: "Haiku", tier: "cheap" },
+      ],
+    },
+    {
+      id: "deepseek", name: "DeepSeek", base_url: "https://api.deepseek.com/anthropic",
+      key_file: "~/.private_keys/deepseek_api_key", available: true,
+      models: [
+        { id: "deepseek-flash", label: "DeepSeek Flash", tier: "cheap" },
+        { id: "deepseek-v4-pro", label: "DeepSeek Pro", tier: "work" },
+      ],
+    },
+  ],
+  route_suggest: (args) => {
+    const task = String(args.task ?? "").toLowerCase();
+    const deep = /arquitet|decis|plano|investig/.test(task);
+    const cheap = /traduz|resum|renome|format/.test(task);
+    const model = deep
+      ? { provider: "", model: "opus", label: "Opus", tier: "deep", reason: 'pede raciocínio ("arquitetura")' }
+      : cheap
+        ? { provider: "deepseek", model: "deepseek-flash", label: "DeepSeek Flash", tier: "cheap", reason: "tarefa mecânica, vai no mais barato" }
+        : { provider: "", model: "sonnet", label: "Sonnet", tier: "work", reason: "execução" };
+    if (/onboarding|iquit/.test(task))
+      return {
+        action: "send", summary: "", command: "", model,
+        candidates: [{ project: "iquit", projectName: "iQuit", runnerId: "r6", runnerName: "Textos do onboarding", status: "idle", live: false, score: 11, reasons: ["a tarefa cita `iquit`", "já trabalhou com: onboarding", "está parado (acorda com o contexto que tinha)"] }],
+      };
+    if (/cosmos|metamorfosis/.test(task)) {
+      const cosmos = task.includes("cosmos");
+      return {
+        action: "spawn", summary: "", command: "", model,
+        candidates: [{ project: cosmos ? "cosmos" : "metamorfosis", projectName: cosmos ? "Cosmos" : "Metamorfosis", runnerId: "", runnerName: "", status: "", live: false, score: 8, reasons: [`a tarefa cita \`${cosmos ? "cosmos" : "metamorfosis"}\``, "agente novo, contexto limpo"] }],
+      };
+    }
+    return { action: "self", summary: "", command: "", model, candidates: [] };
+  },
+  runner_send: () => ({ sent: "r0", via: "tty", woke: false }),
   clis_get: () => [],
   clis_detect: () => [],
   fs_claude_md: () => "# CLAUDE.md\n\nProjeto de exemplo.",

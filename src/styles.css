@@ -749,6 +749,17 @@ button:focus-visible,
   }
 }
 
+@keyframes cx-route-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+.cx-route {
+  animation: cx-route-in 0.16s ease-out;
+}
+
 @keyframes cx-sheet-in {
   from {
     opacity: 0;
