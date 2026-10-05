@@ -6,9 +6,12 @@ pub mod ipc;
 mod ipc_server;
 mod master;
 mod memory;
+mod ops;
 mod projects;
+mod providers;
 mod pty_supervisor;
 pub mod remote;
+mod router;
 mod status_fsm;
 mod store;
 mod tunnel;
@@ -76,7 +79,7 @@ fn pty_spawn(
     // persisted args stay generic, so a rename or a resume never needs a row
     // rewrite, and a legacy row that still carries an injected `--name` gets
     // cleaned up on its way to the PTY.
-    let args = match store
+    let (args, env) = match store
         .runners_get(&id)
         .ok()
         .flatten()
@@ -86,11 +89,12 @@ fn pty_spawn(
             let home = home_dir(&app).unwrap_or_default();
             let args = projects::spawn_args_for(&home, &rec, &cwd);
             let args = projects::with_project_memory(args, &home, &project_slug, &rec);
-            projects::with_initial_prompt(args, &rec, prompt.as_deref().unwrap_or(""))
+            let args = projects::with_initial_prompt(args, &rec, prompt.as_deref().unwrap_or(""));
+            (args, ops::launch_env(&home, &rec).map_err(|e| e.to_string())?)
         }
-        None => args,
+        None => (args, Vec::new()),
     };
-    sup.spawn_with_slug(app, id, project_id, project_slug, kind, cwd, program, args, cols, rows)
+    sup.spawn_with_slug(app, id, project_id, project_slug, kind, cwd, program, args, env, cols, rows)
         .map_err(|e| e.to_string())
 }
 
@@ -555,6 +559,8 @@ fn runners_create(
     cwd: Option<String>,
     task: Option<String>,
     worktree: Option<bool>,
+    model: Option<String>,
+    provider: Option<String>,
 ) -> Result<RunnerRecord, String> {
     let mut rec = projects::build_runner_record(
         uuid_v4(),
@@ -570,6 +576,16 @@ fn runners_create(
         rec.mode = "chat".into();
     }
     rec.name_auto = name_auto.unwrap_or(false);
+    if rec.kind == "agent" && projects::is_claude_command(&rec.args) {
+        let (provider, model) = providers::resolve(
+            &home_dir(&app)?,
+            provider.as_deref().unwrap_or(""),
+            model.as_deref().unwrap_or(""),
+        )
+        .map_err(|e| e.to_string())?;
+        rec.provider = provider;
+        rec.model = model;
+    }
     rec.task = task.unwrap_or_default().trim().to_string();
     rec.cwd = cwd.unwrap_or_default();
     if worktree.unwrap_or(false) {
@@ -648,6 +664,39 @@ fn runners_set_mode(store: State<'_, Store>, id: String, mode: String) -> Result
     store.runners_upsert(&row).map_err(|e| e.to_string())
 }
 
+/* ------------------------------- hub ------------------------------- */
+
+/// Providers and their models, with whether each has its key on disk.
+#[tauri::command]
+fn models_list(app: AppHandle) -> Result<Vec<providers::Provider>, String> {
+    Ok(providers::list(&home_dir(&app)?))
+}
+
+/// Where the router would send `task`, for the preview under the composer.
+#[tauri::command]
+fn route_suggest(app: AppHandle, task: String) -> Result<router::Suggestion, String> {
+    ops::suggest(&app, &task).map_err(|e| e.to_string())
+}
+
+/// Types `message` into an agent, waking it on its old session if needed.
+#[tauri::command]
+fn runner_send(app: AppHandle, store: State<'_, Store>, id: String, message: String) -> Result<serde_json::Value, String> {
+    let rec = runner_record(&store, &id)?;
+    ops::send(&app, &rec, &message).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn runners_set_model(
+    app: AppHandle,
+    store: State<'_, Store>,
+    id: String,
+    provider: String,
+    model: String,
+) -> Result<RunnerRecord, String> {
+    let rec = runner_record(&store, &id)?;
+    ops::set_model(&app, &rec, &provider, &model).map_err(|e| e.to_string())
+}
+
 /* ------------------------------ chat ------------------------------ */
 
 #[tauri::command]
@@ -680,6 +729,7 @@ fn agent_start(
         .unwrap_or_default();
     let args = projects::chat_args_for(&home, &rec, &cwd, &opts);
     let args = projects::with_project_memory(args, &home, &project_slug, &rec);
+    let env = ops::launch_env(&home, &rec).map_err(|e| e.to_string())?;
     let spec = SpawnSpec {
         id,
         project_id: rec.project_id.clone(),
@@ -687,7 +737,7 @@ fn agent_start(
         cwd,
         program: rec.program.clone(),
         args,
-        env: rec.env.clone(),
+        env: env.into_iter().collect(),
     };
     agents.spawn(app, spec).map_err(|e| e.to_string())
 }
@@ -1016,6 +1066,10 @@ pub fn run() {
             runners_set_task,
             git_info,
             runners_reset_session,
+            models_list,
+            route_suggest,
+            runner_send,
+            runners_set_model,
             agent_start,
             agent_send,
             agent_snapshot,

@@ -10,37 +10,49 @@ use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::projects::{self, ProjectRecord};
-use crate::pty_supervisor::{PtySupervisor, RunnerKind};
 use crate::store::Store;
 
 pub const MASTER_NAME: &str = "geral";
 const MASTER_FOLDER: &str = "geral";
-const SPAWN_COLS: u16 = 120;
-const SPAWN_ROWS: u16 = 32;
 
 /// Charter written into the project's memory (and from there into its
-/// CLAUDE.md) the first time the master is created. Only applied when memory
-/// is empty so later hand-edits are never clobbered.
-const MASTER_CHARTER: &str = r#"Você é o **agente mestre** do Bruno. Não é um agente de projeto — é o topo da cadeia.
+/// CLAUDE.md). A hand-edited memory is never clobbered; a charter Cosmos
+/// itself wrote in an earlier release is replaced (see `is_stale_charter`).
+const MASTER_CHARTER: &str = r#"Você é o **Hub** do Bruno: o agente principal. Ele fala só com você, e você decide quem faz.
 
-## Papel
-- Ponto de entrada de tudo: recebe o pedido, decide se resolve aqui ou delega.
-- Conhece todos os projetos do Cosmos e o estado deles.
-- Spawna, acompanha e mata agentes filhos via CLI `cosmos`:
-  `cosmos status` (quem está trabalhando, parado ou esperando resposta),
-  `cosmos runner add --project <slug> --name <nome> --task "<tarefa>" [--worktree]`,
-  `cosmos runner send --project <slug> --name <nome> --message "<texto>"`,
-  `cosmos runner stop|rename|rm`.
-- Trabalha autonomamente: decide, executa, documenta. Não para pra pedir permissão.
+## Como rotear cada pedido
+1. Rode `cosmos route "<pedido>"`. Ele devolve os candidatos em ordem (um agente que já existe, um agente novo no projeto certo, ou você mesmo), o motivo de cada um, o modelo sugerido e o comando pronto.
+2. Decida. A sugestão é um atalho, não uma ordem: confira com `cosmos status` quando ela não convencer.
+   - Agente que já tem o contexto (mesmo projeto, já mexeu no assunto, livre ou parado) → `cosmos runner send`. Um agente parado acorda sozinho na mesma conversa.
+   - Projeto certo, mas ninguém com o contexto, ou o agente está ocupado → `cosmos runner add --task`. Use `--worktree` se outro agente mexe no mesmo repositório.
+   - Pasta que ainda não é projeto → `cosmos project add --folder <pasta> --with-agent <nome> --task`.
+   - Pergunta, diagnóstico rápido, infra da máquina, decisão que cruza projetos → resolva aqui.
+3. Escreva a tarefa como um briefing completo: objetivo, o que já se sabe, critério de pronto. O agente não vê esta conversa.
+4. Diga ao Bruno em uma linha para quem foi e por quê.
 
-## Delegar vs fazer
-- Tarefa de um projeto específico → `cosmos project add` / `cosmos runner add --task` e delega.
-- Pergunta, diagnóstico, decisão de arquitetura, infra da máquina → resolve aqui.
-- Nunca deixa uma tarefa relevante terminar em silêncio: avisa no Telegram começando com `De: Geral`.
+## Modelo por tarefa
+- `--model opus`: arquitetura, decisão, diagnóstico difícil, revisão.
+- `--model sonnet`: execução e volume. É o padrão.
+- `--model deepseek-flash` (ou outro de `cosmos models`): tarefa mecânica e barata, só texto e código. Não tem Chrome, conectores nem imagem.
+
+## Acompanhar
+- `cosmos status`: quem está trabalhando, parado ou esperando resposta, e a última fala de cada um.
+- `cosmos runner peek --id <id>`: lê as últimas falas de um agente sem abrir o terminal. Use antes de responder "como está X?".
+- Agente em `awaiting_input`: responda com `cosmos runner send` se souber a resposta; se a decisão é do Bruno, leve a ele.
+- Nunca deixe uma tarefa relevante terminar em silêncio: avise no Telegram começando com `De: Geral`.
 
 ## Acesso remoto
 O Cosmos serve uma web UI local com túnel Cloudflare. `cosmos web` mostra a URL
-atual e o link autenticado — é assim que o Bruno fala com você do celular."#;
+atual: é assim que o Bruno fala com você do celular."#;
+
+/// True for a charter an earlier release wrote and nobody edited since: it
+/// opens with the old first line and has exactly the old sections. Anything
+/// else is the person's own text and stays.
+fn is_stale_charter(memory: &str) -> bool {
+    let headings: Vec<&str> = memory.lines().filter(|l| l.starts_with("## ")).collect();
+    memory.trim_start().starts_with("Você é o **agente mestre** do Bruno.")
+        && headings == ["## Papel", "## Delegar vs fazer", "## Acesso remoto"]
+}
 
 /// Idempotent: ensures the master project, its folder, its agent runner and a
 /// live PTY. Safe to call on every boot.
@@ -56,21 +68,8 @@ pub fn ensure(app: &AppHandle) -> Result<()> {
 
     // As a chat the master starts on its first message; a PTY on top of that
     // would be a second writer on the same session.
-    let supervisor = app.state::<PtySupervisor>();
-    if runner.mode != "chat" && supervisor.status(&runner.id).is_none() {
-        let cwd = projects::runner_cwd(&project, &runner);
-        supervisor.spawn_with_slug(
-            app.clone(),
-            runner.id.clone(),
-            project.id.clone(),
-            project.slug.clone(),
-            RunnerKind::from_str(&runner.kind),
-            cwd.clone(),
-            runner.program.clone(),
-            projects::spawn_args_for(&home, &runner, &cwd),
-            SPAWN_COLS,
-            SPAWN_ROWS,
-        )?;
+    if runner.mode != "chat" {
+        crate::ops::spawn_pty(app, &project, &runner, "")?;
     }
 
     let _ = app.emit("projects-changed", json!({ "reason": "master.ensure" }));
@@ -87,9 +86,7 @@ fn ensure_project(home: &Path, store: &Store) -> Result<ProjectRecord> {
         .find(|p| p.name.eq_ignore_ascii_case(MASTER_NAME));
 
     if let Some(mut project) = existing {
-        // Backfill the charter for a master that predates it — but only into
-        // an empty memory, never over something the user wrote.
-        if project.memory.trim().is_empty() {
+        if project.memory.trim().is_empty() || is_stale_charter(&project.memory) {
             project.memory = MASTER_CHARTER.to_string();
             store.projects_upsert(&projects::record_to_row(&project)?)?;
             let _ = projects::refresh_claude_md(
@@ -146,4 +143,19 @@ fn now_unix() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const V1: &str = "Você é o **agente mestre** do Bruno. Não é um agente de projeto.\n\n## Papel\n- x\n\n## Delegar vs fazer\n- y\n\n## Acesso remoto\nz";
+
+    #[test]
+    fn an_untouched_old_charter_is_replaced_and_an_edited_one_is_not() {
+        assert!(is_stale_charter(V1));
+        assert!(!is_stale_charter(&format!("{V1}\n\n## Minhas regras\n- nunca delegue o Ninar")));
+        assert!(!is_stale_charter("Anotações do Bruno"));
+        assert!(!is_stale_charter(MASTER_CHARTER));
+    }
 }

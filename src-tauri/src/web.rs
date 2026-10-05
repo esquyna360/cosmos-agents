@@ -26,7 +26,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::projects;
-use crate::pty_supervisor::{PtySupervisor, RunnerKind};
+use crate::pty_supervisor::PtySupervisor;
 use crate::store::Store;
 
 const COOKIE: &str = "cosmos_web";
@@ -264,22 +264,10 @@ fn find_runner(app: &AppHandle, id: &str) -> Option<(projects::RunnerRecord, pro
 /// an agent.
 fn spawn_runner(app: &AppHandle, id: &str) -> Result<()> {
     let (runner, project) = find_runner(app, id).ok_or_else(|| anyhow!("no runner `{id}`"))?;
-    let supervisor = app.state::<PtySupervisor>();
-    if supervisor.status(id).is_some() {
+    if app.state::<PtySupervisor>().status(id).is_some() {
         return Ok(());
     }
-    supervisor.spawn_with_slug(
-        app.clone(),
-        runner.id.clone(),
-        project.id.clone(),
-        project.slug.clone(),
-        RunnerKind::from_str(&runner.kind),
-        project.cwd.clone(),
-        runner.program.clone(),
-        runner.args.clone(),
-        SPAWN_COLS,
-        SPAWN_ROWS,
-    )?;
+    crate::ops::spawn_pty(app, &project, &runner, "")?;
     let _ = app.emit(
         "runners-changed",
         json!({ "reason": "web.spawn", "projectId": project.id }),

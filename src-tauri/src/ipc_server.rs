@@ -27,14 +27,10 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::agent_proc::AgentSupervisor;
 use crate::ipc::{Request, Response};
+use crate::ops::{self, home_of, liveness, now_unix};
 use crate::projects::{self, ProjectRecord, RunnerRecord};
-use crate::pty_supervisor::{PtySupervisor, RunnerKind};
+use crate::pty_supervisor::PtySupervisor;
 use crate::store::Store;
-
-/// Reasonable default geometry for an auto-spawned PTY. The UI resizes to the
-/// real terminal dims when the user attaches in the webview.
-const SPAWN_COLS: u16 = 120;
-const SPAWN_ROWS: u16 = 32;
 
 /// Build a platform-appropriate local-socket name from `socket_path`. On Unix
 /// we use the path verbatim as a filesystem socket; on Windows we take the
@@ -153,7 +149,10 @@ fn dispatch(app: &AppHandle, req: Request) -> Response {
             memory,
             with_agent,
             task,
-        } => handle_project_add(app, name, folders, memory, with_agent, task),
+            model,
+            provider,
+            parent,
+        } => handle_project_add(app, name, folders, memory, with_agent, task, model, provider, parent),
         Request::ProjectList => handle_project_list(app),
         Request::RunnerAdd {
             project,
@@ -162,12 +161,18 @@ fn dispatch(app: &AppHandle, req: Request) -> Response {
             task,
             worktree,
             tty,
+            model,
+            provider,
+            parent,
         } => resolve_project(app, &project).and_then(|p| {
             let opts = AddOptions {
                 kind: kind.as_deref().unwrap_or("agent"),
                 task: task.as_deref().unwrap_or(""),
                 worktree,
                 tty,
+                model: model.as_deref().unwrap_or(""),
+                provider: provider.as_deref().unwrap_or(""),
+                parent: parent.as_deref().unwrap_or(""),
             };
             Ok(serde_json::to_value(spawn_runner(app, &p, name, &opts)?)?)
         }),
@@ -184,7 +189,7 @@ fn dispatch(app: &AppHandle, req: Request) -> Response {
             id,
             message,
         } => resolve_runner(app, project.as_deref(), name.as_deref(), id.as_deref())
-            .and_then(|r| handle_runner_send(app, r, &message)),
+            .and_then(|r| ops::send(app, &r, &message)),
         Request::RunnerStop { project, name, id } => {
             resolve_runner(app, project.as_deref(), name.as_deref(), id.as_deref())
                 .and_then(|r| handle_runner_stop(app, r))
@@ -196,25 +201,39 @@ fn dispatch(app: &AppHandle, req: Request) -> Response {
             to,
         } => resolve_runner(app, project.as_deref(), name.as_deref(), id.as_deref())
             .and_then(|r| handle_runner_rename(app, r, &to)),
-        Request::Status => handle_status(app),
+        Request::RunnerSet {
+            project,
+            name,
+            id,
+            model,
+            provider,
+        } => resolve_runner(app, project.as_deref(), name.as_deref(), id.as_deref()).and_then(|r| {
+            let rec = ops::set_model(
+                app,
+                &r,
+                provider.as_deref().unwrap_or(""),
+                model.as_deref().unwrap_or(""),
+            )?;
+            Ok(json!({
+                "runner": rec,
+                "note": "vale no próximo start: `cosmos runner stop` e depois `runner send`",
+            }))
+        }),
+        Request::RunnerPeek {
+            project,
+            name,
+            id,
+            turns,
+        } => resolve_runner(app, project.as_deref(), name.as_deref(), id.as_deref())
+            .and_then(|r| ops::peek(app, &r, turns.unwrap_or(6))),
+        Request::Status => ops::status(app),
+        Request::Route { task } => ops::suggest(app, &task).and_then(|s| Ok(serde_json::to_value(s)?)),
+        Request::Models => home_of(app).and_then(|h| Ok(serde_json::to_value(crate::providers::list(&h))?)),
     };
     match result {
         Ok(v) => Response::ok(v),
         Err(e) => Response::err(e.to_string()),
     }
-}
-
-fn now_unix() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-
-fn home_of(app: &AppHandle) -> Result<std::path::PathBuf> {
-    app.path()
-        .home_dir()
-        .map_err(|e| anyhow!(e.to_string()))
 }
 
 fn handle_project_add(
@@ -224,6 +243,9 @@ fn handle_project_add(
     memory: String,
     with_agent: Option<String>,
     task: Option<String>,
+    model: Option<String>,
+    provider: Option<String>,
+    parent: Option<String>,
 ) -> Result<serde_json::Value> {
     let home = home_of(app)?;
     let store = app.state::<Store>();
@@ -244,6 +266,9 @@ fn handle_project_add(
             task: task.as_deref().unwrap_or(""),
             worktree: false,
             tty: false,
+            model: model.as_deref().unwrap_or(""),
+            provider: provider.as_deref().unwrap_or(""),
+            parent: parent.as_deref().unwrap_or(""),
         };
         Some(spawn_runner(app, &project, agent_name, &opts)?)
     } else {
@@ -279,56 +304,6 @@ fn handle_runner_list(app: &AppHandle, project: Option<&str>) -> Result<serde_js
             v["live"] = json!(live);
             v["status"] = json!(status);
             v
-        })
-        .collect();
-    Ok(json!(out))
-}
-
-/// `(live, status)` for a runner, whichever supervisor owns its process.
-fn liveness(app: &AppHandle, rec: &RunnerRecord) -> (bool, String) {
-    let status = app
-        .state::<PtySupervisor>()
-        .status(&rec.id)
-        .or_else(|| app.state::<Arc<AgentSupervisor>>().status(&rec.id));
-    match status {
-        Some(s) => (
-            true,
-            serde_json::to_value(s)
-                .ok()
-                .and_then(|v| v.as_str().map(str::to_string))
-                .unwrap_or_else(|| "running".into()),
-        ),
-        // A chat without a process is between messages, not gone.
-        None if rec.kind == "agent" && rec.mode == "chat" => (false, "idle".into()),
-        None => (false, "exited".into()),
-    }
-}
-
-fn handle_status(app: &AppHandle) -> Result<serde_json::Value> {
-    let store = app.state::<Store>();
-    let runners = projects::runners_list(&store)?;
-    let out: Vec<serde_json::Value> = projects::list(&store)?
-        .iter()
-        .map(|p| {
-            let rs: Vec<serde_json::Value> = runners
-                .iter()
-                .filter(|r| r.project_id == p.id)
-                .map(|r| {
-                    let (live, status) = liveness(app, r);
-                    json!({
-                        "name": r.name,
-                        "id": r.id,
-                        "kind": r.kind,
-                        "mode": r.mode,
-                        "status": status,
-                        "live": live,
-                        "branch": r.branch,
-                        "task": r.task,
-                        "lastActive": r.last_active,
-                    })
-                })
-                .collect();
-            json!({ "project": p.name, "slug": p.slug, "runners": rs })
         })
         .collect();
     Ok(json!(out))
@@ -450,32 +425,6 @@ fn handle_runner_rename(app: &AppHandle, mut target: RunnerRecord, to: &str) -> 
     Ok(serde_json::to_value(target)?)
 }
 
-fn handle_runner_send(app: &AppHandle, target: RunnerRecord, message: &str) -> Result<serde_json::Value> {
-    let message = message.trim();
-    if message.is_empty() {
-        anyhow::bail!("--message is empty");
-    }
-    if target.kind != "agent" {
-        anyhow::bail!("`{}` is a shell, not an agent", target.name);
-    }
-    if target.mode == "chat" {
-        // The stream-json protocol lives in the webview, which also starts
-        // the process when there is none.
-        app.emit("agent-task", json!({ "runnerId": target.id, "text": message }))?;
-        return Ok(json!({ "sent": target.id, "via": "chat" }));
-    }
-    let pty = app.state::<PtySupervisor>();
-    if pty.status(&target.id).is_none() {
-        anyhow::bail!(
-            "`{}` is a stopped terminal agent — open it in Cosmos first, or create agents without --tty",
-            target.name
-        );
-    }
-    pty.write(&target.id, message.replace('\n', " ").as_bytes())?;
-    pty.write(&target.id, b"\r")?;
-    Ok(json!({ "sent": target.id, "via": "tty" }))
-}
-
 /// Resolves a project handle to a record. `"."` means "use whatever
 /// COSMOS_PROJECT_SLUG resolved to on the client side" — by the time we get
 /// here the CLI already substituted, so we should never see a literal `.`.
@@ -494,24 +443,14 @@ fn resolve_project(app: &AppHandle, handle: &str) -> Result<ProjectRecord> {
     projects::row_to_record(row)
 }
 
-/// Persist a runner record, then spawn its PTY against the project's cwd
-/// using the canonical agent/shell defaults. Emits `runners-changed` so the
-/// sidebar refreshes.
-/// Home dir for session-file lookups. Falls back to an empty path, which just
-/// means `claude_session_exists` returns false and the spawn pins a fresh id.
-fn home_dir() -> PathBuf {
-    #[cfg(windows)]
-    let var = "USERPROFILE";
-    #[cfg(not(windows))]
-    let var = "HOME";
-    std::env::var_os(var).map(PathBuf::from).unwrap_or_default()
-}
-
 struct AddOptions<'a> {
     kind: &'a str,
     task: &'a str,
     worktree: bool,
     tty: bool,
+    model: &'a str,
+    provider: &'a str,
+    parent: &'a str,
 }
 
 /// Persists a runner and brings it up. Claude agents are chats by default:
@@ -524,7 +463,7 @@ fn spawn_runner(
     opts: &AddOptions,
 ) -> Result<RunnerRecord> {
     let store = app.state::<Store>();
-    let home = home_dir();
+    let home = home_of(app)?;
     let mut rec = projects::build_runner_record(
         crate::uuid_v4_for_ipc(),
         project.id.clone(),
@@ -543,6 +482,16 @@ fn spawn_runner(
     }
     if is_agent {
         rec.task = opts.task.trim().to_string();
+        let (provider, model) = crate::providers::resolve(&home, opts.provider, opts.model)?;
+        rec.provider = provider;
+        rec.model = model;
+    } else if !opts.model.is_empty() || !opts.provider.is_empty() {
+        anyhow::bail!("--model and --provider only apply to agents");
+    }
+    // A parent that no longer exists is dropped rather than refused: the
+    // delegation line is a nicety, the agent is the point.
+    if store.runners_get(opts.parent)?.is_some() {
+        rec.parent_id = opts.parent.to_string();
     }
     if opts.worktree {
         if !is_agent {
@@ -555,22 +504,7 @@ fn spawn_runner(
     store.runners_upsert(&projects::runner_record_to_row(&rec)?)?;
 
     if !as_chat {
-        let cwd = projects::runner_cwd(project, &rec);
-        let args = projects::spawn_args_for(&home, &rec, &cwd);
-        let args = projects::with_project_memory(args, &home, &project.slug, &rec);
-        let args = projects::with_initial_prompt(args, &rec, &rec.task);
-        app.state::<PtySupervisor>().spawn_with_slug(
-            app.clone(),
-            rec.id.clone(),
-            project.id.clone(),
-            project.slug.clone(),
-            RunnerKind::from_str(&rec.kind),
-            cwd,
-            rec.program.clone(),
-            args,
-            SPAWN_COLS,
-            SPAWN_ROWS,
-        )?;
+        ops::spawn_pty(app, project, &rec, &rec.task)?;
     }
     emit_runners_changed(app, "ipc.runner.add", &project.id);
     if as_chat && !rec.task.is_empty() {

@@ -112,6 +112,7 @@ impl PtySupervisor {
         cwd: String,
         program: String,
         args: Vec<String>,
+        env: Vec<(String, String)>,
         cols: u16,
         rows: u16,
     ) -> Result<()> {
@@ -133,6 +134,9 @@ impl PtySupervisor {
         }
         cmd.cwd(cwd);
         cmd.env("TERM", "xterm-256color");
+        for (k, v) in &env {
+            cmd.env(k, v);
+        }
 
         // Inject the Cosmos self-reference channel: the spawned agent can run
         // `cosmos runner add --project . --name foo` and the CLI uses these

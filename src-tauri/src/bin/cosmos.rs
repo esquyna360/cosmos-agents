@@ -43,8 +43,18 @@ enum Cmd {
         #[arg(long)]
         link: bool,
     },
-    /// Every project with its runners: status, branch and task.
+    /// Every project with its runners: status, model, who delegated it and
+    /// the last thing it said.
     Status,
+    /// Where a task should go: an existing agent, a new one in the right
+    /// project, or nowhere (answer it yourself), and on which model. Prints
+    /// the ranked candidates with reasons and a ready-to-run command.
+    Route {
+        /// The task, in plain words.
+        task: Vec<String>,
+    },
+    /// Providers and models an agent can run on, and which have their key.
+    Models,
 }
 
 #[derive(Subcommand)]
@@ -63,6 +73,11 @@ enum ProjectCmd {
         /// First message for the --with-agent agent.
         #[arg(long)]
         task: Option<String>,
+        /// Model for the --with-agent agent (see `cosmos models`).
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        provider: Option<String>,
     },
     List,
     /// Delete a project, its runners and its resumable sessions. The
@@ -107,6 +122,14 @@ enum RunnerCmd {
         /// Start the agent in a terminal instead of the chat.
         #[arg(long)]
         tty: bool,
+        /// Model: `opus` (architecture, decisions), `sonnet` (execution),
+        /// `haiku`, or a provider's model such as `deepseek-flash`.
+        #[arg(long)]
+        model: Option<String>,
+        /// Provider id from `cosmos models`. Inferred from --model when the
+        /// model belongs to one.
+        #[arg(long)]
+        provider: Option<String>,
     },
     List {
         #[arg(long)]
@@ -137,6 +160,23 @@ enum RunnerCmd {
         target: Target,
         #[arg(long)]
         to: String,
+    },
+    /// Change the model or provider. Applies on the runner's next start.
+    Set {
+        #[command(flatten)]
+        target: Target,
+        #[arg(long)]
+        model: Option<String>,
+        #[arg(long)]
+        provider: Option<String>,
+    },
+    /// Read the last turns of an agent's conversation without opening it.
+    Peek {
+        #[command(flatten)]
+        target: Target,
+        /// How many turns, newest last.
+        #[arg(long, default_value_t = 6)]
+        turns: usize,
     },
 }
 
@@ -241,6 +281,14 @@ fn build_request(cli: Cli) -> Result<Request, String> {
     Ok(match cli.cmd {
         Cmd::Web { .. } => unreachable!("handled in main"),
         Cmd::Status => Request::Status,
+        Cmd::Models => Request::Models,
+        Cmd::Route { task } => {
+            let task = task.join(" ");
+            if task.trim().is_empty() {
+                return Err("cosmos: `route` needs the task: cosmos route \"<o que fazer>\"".into());
+            }
+            Request::Route { task }
+        }
         Cmd::Project { cmd } => match cmd {
             ProjectCmd::Add {
                 name,
@@ -248,12 +296,17 @@ fn build_request(cli: Cli) -> Result<Request, String> {
                 memory,
                 with_agent,
                 task,
+                model,
+                provider,
             } => Request::ProjectAdd {
                 name,
                 folders,
                 memory,
                 with_agent,
                 task,
+                model,
+                provider,
+                parent: caller_runner(),
             },
             ProjectCmd::List => Request::ProjectList,
             ProjectCmd::Rm { project, yes } => {
@@ -277,6 +330,8 @@ their resumable sessions. Re-run with --yes if that is what you want."
                 task,
                 worktree,
                 tty,
+                model,
+                provider,
             } => {
                 let project = resolve_project_handle(&project)?;
                 Request::RunnerAdd {
@@ -286,6 +341,9 @@ their resumable sessions. Re-run with --yes if that is what you want."
                     task,
                     worktree,
                     tty,
+                    model,
+                    provider,
+                    parent: caller_runner(),
                 }
             }
             RunnerCmd::List { project } => {
@@ -319,6 +377,17 @@ Re-run with --yes if that is what you want."
                 let (project, name, id) = target.resolve()?;
                 Request::RunnerStop { project, name, id }
             }
+            RunnerCmd::Set { target, model, provider } => {
+                if model.is_none() && provider.is_none() {
+                    return Err("cosmos: pass --model and/or --provider".into());
+                }
+                let (project, name, id) = target.resolve()?;
+                Request::RunnerSet { project, name, id, model, provider }
+            }
+            RunnerCmd::Peek { target, turns } => {
+                let (project, name, id) = target.resolve()?;
+                Request::RunnerPeek { project, name, id, turns: Some(turns) }
+            }
             RunnerCmd::Rename { target, to } => {
                 let (project, name, id) = target.resolve()?;
                 Request::RunnerRename {
@@ -330,6 +399,12 @@ Re-run with --yes if that is what you want."
             }
         },
     })
+}
+
+/// The runner this CLI is being run from, so what it creates records who
+/// delegated it.
+fn caller_runner() -> Option<String> {
+    std::env::var("COSMOS_RUNNER_ID").ok().filter(|v| !v.is_empty())
 }
 
 /// `"."` means "the project this agent belongs to". The app injects

@@ -78,6 +78,12 @@ pub struct RunnerRow {
     pub branch: String,
     /// What the runner was asked to do, shown next to its name.
     pub task: String,
+    /// Model alias or full name passed as `--model`. Empty = the CLI default.
+    pub model: String,
+    /// Provider id from `providers.rs`. Empty = Anthropic.
+    pub provider: String,
+    /// Runner that asked for this one. Empty = created by a person.
+    pub parent_id: String,
 }
 
 impl Store {
@@ -177,6 +183,9 @@ impl Store {
         }
         if user_version < 7 {
             Self::migrate_v6_to_v7(&mut conn)?;
+        }
+        if user_version < 8 {
+            Self::migrate_v7_to_v8(&mut conn)?;
         }
         Ok(())
     }
@@ -450,6 +459,18 @@ impl Store {
         Ok(())
     }
 
+    /// v7 → v8: a runner remembers which model and provider it runs on, and
+    /// which runner asked for it.
+    fn migrate_v7_to_v8(conn: &mut Connection) -> Result<()> {
+        let tx = conn.transaction()?;
+        Self::ensure_column(&tx, "runners", "model", "TEXT NOT NULL DEFAULT ''")?;
+        Self::ensure_column(&tx, "runners", "provider", "TEXT NOT NULL DEFAULT ''")?;
+        Self::ensure_column(&tx, "runners", "parent_id", "TEXT NOT NULL DEFAULT ''")?;
+        tx.execute_batch("PRAGMA user_version = 8")?;
+        tx.commit().context("committing v7→v8 migration")?;
+        Ok(())
+    }
+
     /// Writes a new order for the given ids. Anything not named keeps its
     /// slot at the end, so a stale list from the UI can't drop a row.
     pub fn reorder(&self, table: &str, ids: &[String]) -> Result<()> {
@@ -569,7 +590,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, project_id, kind, name, program, args_json, env_json, \
                     with_status_fsm, created_at, last_active, session_id, \
-                    mode, name_auto, cwd, branch, task \
+                    mode, name_auto, cwd, branch, task, model, provider, parent_id \
              FROM runners ORDER BY position ASC, last_active DESC",
         )?;
         let rows = stmt
@@ -591,6 +612,9 @@ impl Store {
                     cwd: row.get(13)?,
                     branch: row.get(14)?,
                     task: row.get(15)?,
+                    model: row.get(16)?,
+                    provider: row.get(17)?,
+                    parent_id: row.get(18)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -602,7 +626,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, project_id, kind, name, program, args_json, env_json, \
                     with_status_fsm, created_at, last_active, session_id, \
-                    mode, name_auto, cwd, branch, task \
+                    mode, name_auto, cwd, branch, task, model, provider, parent_id \
              FROM runners WHERE id = ?1",
         )?;
         let mut rows = stmt.query(params![id])?;
@@ -624,6 +648,9 @@ impl Store {
                 cwd: row.get(13)?,
                 branch: row.get(14)?,
                 task: row.get(15)?,
+                model: row.get(16)?,
+                provider: row.get(17)?,
+                parent_id: row.get(18)?,
             }))
         } else {
             Ok(None)
@@ -637,9 +664,10 @@ impl Store {
             INSERT INTO runners
                 (id, project_id, kind, name, program, args_json, env_json,
                  with_status_fsm, created_at, last_active, session_id, mode,
-                 name_auto, cwd, branch, task, position)
+                 name_auto, cwd, branch, task, model, provider, parent_id,
+                 position)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                    ?14, ?15, ?16,
+                    ?14, ?15, ?16, ?17, ?18, ?19,
                     (SELECT COALESCE(MAX(position), -1) + 1 FROM runners))
             ON CONFLICT(id) DO UPDATE SET
                 project_id = excluded.project_id,
@@ -655,7 +683,10 @@ impl Store {
                 name_auto = excluded.name_auto,
                 cwd = excluded.cwd,
                 branch = excluded.branch,
-                task = excluded.task
+                task = excluded.task,
+                model = excluded.model,
+                provider = excluded.provider,
+                parent_id = excluded.parent_id
             "#,
             params![
                 row.id,
@@ -674,6 +705,9 @@ impl Store {
                 row.cwd,
                 row.branch,
                 row.task,
+                row.model,
+                row.provider,
+                row.parent_id,
             ],
         )?;
         Ok(())
@@ -872,6 +906,9 @@ mod tests {
             cwd: "".into(),
             branch: "".into(),
             task: "".into(),
+            model: "".into(),
+            provider: "".into(),
+            parent_id: "".into(),
         };
         store.runners_upsert(&row).unwrap();
         assert_eq!(store.runners_get("r1").unwrap().unwrap().cwd, "");

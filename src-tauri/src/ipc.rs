@@ -32,6 +32,12 @@ pub enum Request {
         /// First message for that agent.
         #[serde(default)]
         task: Option<String>,
+        #[serde(default)]
+        model: Option<String>,
+        #[serde(default)]
+        provider: Option<String>,
+        #[serde(default)]
+        parent: Option<String>,
     },
     /// Read-only listing.
     ProjectList,
@@ -53,6 +59,15 @@ pub enum Request {
         /// (starts on its first message).
         #[serde(default)]
         tty: bool,
+        /// `--model` for the CLI: an alias (`opus`, `sonnet`) or a full name.
+        #[serde(default)]
+        model: Option<String>,
+        /// Provider id from `cosmos models`. Absent = Anthropic.
+        #[serde(default)]
+        provider: Option<String>,
+        /// Id of the runner that asked for this one (`$COSMOS_RUNNER_ID`).
+        #[serde(default)]
+        parent: Option<String>,
     },
     /// Read-only listing, optionally filtered by project slug or `.`.
     RunnerList {
@@ -107,8 +122,36 @@ pub enum Request {
         id: Option<String>,
         to: String,
     },
+    /// Change the model or provider a runner starts on next time.
+    RunnerSet {
+        #[serde(default)]
+        project: Option<String>,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        id: Option<String>,
+        #[serde(default)]
+        model: Option<String>,
+        #[serde(default)]
+        provider: Option<String>,
+    },
+    /// The last turns of an agent's conversation.
+    RunnerPeek {
+        #[serde(default)]
+        project: Option<String>,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        id: Option<String>,
+        #[serde(default)]
+        turns: Option<usize>,
+    },
     /// Every project with its runners and what each is doing.
     Status,
+    /// Where a task should go and on which model. Read-only.
+    Route { task: String },
+    /// Providers, their models and whether each has its key.
+    Models,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

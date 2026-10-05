@@ -52,6 +52,15 @@ pub struct RunnerRecord {
     /// What the runner was asked to do.
     #[serde(default)]
     pub task: String,
+    /// `--model` value. Empty = whatever the CLI defaults to.
+    #[serde(default)]
+    pub model: String,
+    /// Provider id (`providers.rs`). Empty = Anthropic.
+    #[serde(default)]
+    pub provider: String,
+    /// The runner that delegated this one.
+    #[serde(default)]
+    pub parent_id: String,
 }
 
 /// Chat mode is switched off for now: the headless session can't drive the
@@ -326,24 +335,33 @@ Always use absolute paths when reading or editing files inside them.\n\n",
 new project from this session, use the `cosmos` CLI (already on PATH):\n\n",
     );
     out.push_str("```sh\n");
+    out.push_str("# Where should a task go? Ranked candidates (an existing agent, a new one\n");
+    out.push_str("# in the right project, or yourself), a model and a ready-to-run command:\n");
+    out.push_str("cosmos route \"<task>\"\n\n");
     out.push_str("# New sibling agent in this project. --task is its first message;\n");
     out.push_str("# --worktree gives it its own git worktree and branch instead of the\n");
-    out.push_str("# shared checkout; --tty runs it as a terminal instead of a chat:\n");
+    out.push_str("# shared checkout. --model picks what it runs on: opus (architecture,\n");
+    out.push_str("# decisions), sonnet (execution, the default), or a cheap provider model\n");
+    out.push_str("# from `cosmos models` such as deepseek-flash (text and code only):\n");
     out.push_str(
-        "cosmos runner add --project . --name \"<name>\" [--task \"<what to do>\"] [--worktree] [--tty]\n\n",
+        "cosmos runner add --project . --name \"<name>\" [--task \"<what to do>\"] [--worktree] [--model <model>]\n\n",
     );
     out.push_str("# New project, optionally with an agent inside:\n");
     out.push_str(
-        "cosmos project add --name \"<name>\" --folder /abs/path [--folder ...] \\\n  [--with-agent \"<agent-name>\" [--task \"<what to do>\"]]\n\n",
+        "cosmos project add --name \"<name>\" --folder /abs/path [--folder ...] \\\n  [--with-agent \"<agent-name>\" [--task \"<what to do>\"] [--model <model>]]\n\n",
     );
-    out.push_str("# Who is working, stopped or waiting for an answer, across every project:\n");
+    out.push_str("# Who is working, stopped or waiting for an answer, across every project,\n");
+    out.push_str("# with each agent's model and the last thing it said:\n");
     out.push_str("cosmos status\n");
     out.push_str("cosmos project list\n");
     out.push_str("cosmos runner list --project .\n\n");
-    out.push_str("# Talk to, stop or rename an agent (--id works instead of --name):\n");
+    out.push_str("# Talk to an agent (a stopped one wakes up on the same conversation), read\n");
+    out.push_str("# its last turns, stop or rename it (--id works instead of --name):\n");
     out.push_str("cosmos runner send --project . --name \"<name>\" --message \"<text>\"\n");
+    out.push_str("cosmos runner peek --project . --name \"<name>\" [--turns 6]\n");
     out.push_str("cosmos runner stop --project . --name \"<name>\"\n");
-    out.push_str("cosmos runner rename --project . --name \"<name>\" --to \"<new name>\"\n\n");
+    out.push_str("cosmos runner rename --project . --name \"<name>\" --to \"<new name>\"\n");
+    out.push_str("cosmos runner set --project . --name \"<name>\" --model <model>\n\n");
     out.push_str("# Removal (destructive — needs --yes):\n");
     out.push_str("cosmos runner rm --project . --name \"<name>\" --yes\n");
     out.push_str("cosmos project rm --project \"<slug>\" --yes\n\n");
@@ -353,7 +371,8 @@ new project from this session, use the `cosmos` CLI (already on PATH):\n\n",
     out.push_str("```\n\n");
     out.push_str(
         "`--project .` resolves to this project via `$COSMOS_PROJECT_SLUG`. \
-The new agent appears in the app but does **not** steal focus.\n",
+The new agent appears in the app but does **not** steal focus, and is recorded \
+as delegated by you.\n",
     );
 
     // For each folder that already has its own CLAUDE.md, @-include it so the
@@ -476,6 +495,9 @@ pub fn runner_row_to_record(row: RunnerRow) -> Result<RunnerRecord> {
         cwd: row.cwd,
         branch: row.branch,
         task: row.task,
+        model: row.model,
+        provider: row.provider,
+        parent_id: row.parent_id,
     })
 }
 
@@ -499,6 +521,9 @@ pub fn runner_record_to_row(rec: &RunnerRecord) -> Result<RunnerRow> {
         cwd: rec.cwd.clone(),
         branch: rec.branch.clone(),
         task: rec.task.clone(),
+        model: rec.model.clone(),
+        provider: rec.provider.clone(),
+        parent_id: rec.parent_id.clone(),
     })
 }
 
@@ -683,6 +708,7 @@ pub fn build_spawn_args(
     name: Option<&str>,
     session_id: &str,
     resume: bool,
+    model: &str,
 ) -> Vec<String> {
     args.iter()
         .map(|a| {
@@ -692,6 +718,10 @@ pub fn build_spawn_args(
             // The fullscreen renderer takes scrolling and selection away from
             // the terminal emulator, which is what made the TUI feel stuck.
             let mut line = strip_injected_flags(a).replace("env CLAUDE_CODE_NO_FLICKER=1 ", "");
+            if !model.is_empty() {
+                line.push_str(" --model ");
+                line.push_str(&shell_quote(model));
+            }
             if let Some(name) = name {
                 line.push_str(" --name ");
                 line.push_str(&shell_quote(name));
@@ -719,7 +749,7 @@ pub fn spawn_args_for(home: &Path, rec: &RunnerRecord, cwd: &str) -> Vec<String>
         return rec.args.clone();
     }
     let resume = claude_session_exists(home, cwd, &rec.session_id);
-    build_spawn_args(&rec.args, spawn_name(rec), &rec.session_id, resume)
+    build_spawn_args(&rec.args, spawn_name(rec), &rec.session_id, resume, &rec.model)
 }
 
 /// A machine-written placeholder is not worth pinning: `--name` writes a
@@ -754,7 +784,11 @@ pub fn chat_args_for(home: &Path, rec: &RunnerRecord, cwd: &str, opts: &ChatOpti
             };
             line.push_str(" --permission-mode ");
             line.push_str(mode);
-            if let Some(model) = opts.model.filter(|m| !m.is_empty() && *m != "default") {
+            let model = opts
+                .model
+                .filter(|m| !m.is_empty() && *m != "default")
+                .or(Some(rec.model.as_str()).filter(|m| !m.is_empty()));
+            if let Some(model) = model {
                 line.push_str(" --model ");
                 line.push_str(&shell_quote(model));
             }
@@ -889,6 +923,9 @@ pub fn build_runner_record(
         cwd: String::new(),
         branch: String::new(),
         task: String::new(),
+        model: String::new(),
+        provider: String::new(),
+        parent_id: String::new(),
     }
 }
 
@@ -974,14 +1011,14 @@ mod tests {
     #[test]
     fn first_spawn_pins_the_session_id() {
         let args = vec!["-i".into(), "-l".into(), "-c".into(), CLAUDE_LINE.into()];
-        let out = build_spawn_args(&args, Some("main"), "abc-123", false);
+        let out = build_spawn_args(&args, Some("main"), "abc-123", false, "");
         assert_eq!(out[3], format!("{CLAUDE_LINE} --name 'main' --session-id abc-123"));
     }
 
     #[test]
     fn later_spawns_resume_that_session() {
         let args = vec!["-c".into(), CLAUDE_LINE.into()];
-        let out = build_spawn_args(&args, Some("main"), "abc-123", true);
+        let out = build_spawn_args(&args, Some("main"), "abc-123", true, "");
         assert_eq!(out[1], format!("{CLAUDE_LINE} --name 'main' --resume abc-123"));
     }
 
@@ -990,16 +1027,24 @@ mod tests {
     #[test]
     fn legacy_injected_name_is_stripped_not_stacked() {
         let legacy = format!("{CLAUDE_LINE} --name 'old'");
-        let out = build_spawn_args(&[legacy], Some("novo"), "s1", false);
+        let out = build_spawn_args(&[legacy], Some("novo"), "s1", false, "");
         assert_eq!(out[0], format!("{CLAUDE_LINE} --name 'novo' --session-id s1"));
-        let twice = build_spawn_args(&out, Some("novo"), "s1", false);
+        let twice = build_spawn_args(&out, Some("novo"), "s1", false, "");
         assert_eq!(twice, out);
     }
 
     #[test]
     fn stored_no_flicker_prefix_is_dropped_at_spawn() {
-        let out = build_spawn_args(&[LEGACY_LINE.to_string()], None, "s1", true);
+        let out = build_spawn_args(&[LEGACY_LINE.to_string()], None, "s1", true, "");
         assert_eq!(out[0], format!("{CLAUDE_LINE} --resume s1"));
+    }
+
+    #[test]
+    fn the_model_rides_on_the_claude_line_and_survives_a_respawn() {
+        let args = vec!["-c".into(), CLAUDE_LINE.into()];
+        let out = build_spawn_args(&args, None, "s1", true, "deepseek-flash");
+        assert_eq!(out[1], format!("{CLAUDE_LINE} --model 'deepseek-flash' --resume s1"));
+        assert_eq!(build_spawn_args(&out, None, "s1", true, "deepseek-flash"), out);
     }
 
     #[test]
@@ -1074,7 +1119,7 @@ mod tests {
     #[test]
     fn non_claude_commands_pass_through() {
         let args = vec!["-i".into(), "-l".into(), "-c".into(), "exec pnpm dev".into()];
-        assert_eq!(build_spawn_args(&args, Some("dev"), "s1", true), args);
+        assert_eq!(build_spawn_args(&args, Some("dev"), "s1", true, "opus"), args);
         assert!(!is_claude_command(&args));
     }
 
