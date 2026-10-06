@@ -326,6 +326,9 @@ const VAULT: MockNote[] = (() => {
   add("guideline", "ads", "store-screenshots", "Screenshots de loja", "", ["loja", "aso"], "Promessa em cima, momento de pico embaixo. Nunca print cru.\n\nVale para todo app: [[PADRAO-DE-QUALIDADE]].");
   add("guideline", "", "AGENTES", "Agentes e escopo", "", ["agentes"], "Cada agente roda na pasta do seu escopo. O Hub decide com `cosmos route`.");
   const projects = ["ninar", "iquit", "splat-up", "cat-arcade", "one-cue", "metamorfosis", "tangle", "frog-dive"];
+  // `?stress=N` grows the vault too, to check the graph near a thousand notes.
+  const extra = Number(new URLSearchParams(location.search).get("stress")) || 0;
+  for (let i = 0; i < extra * 2; i++) projects.push(`jogo-${i + 1}`);
   const topics: [string, string, string[]][] = [
     ["paywall", "Como o paywall cobra e quando aparece", ["project", "monetizacao"]],
     ["web-portal-upload", "Upload de build no CrazyGames e Poki, passo a passo", ["reference", "upload"]],
