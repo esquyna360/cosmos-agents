@@ -63,6 +63,7 @@ pub fn spawn_pty(app: &AppHandle, project: &ProjectRecord, rec: &RunnerRecord, p
     let args = projects::spawn_args_for(&home, rec, &cwd);
     let args = projects::with_project_memory(args, &home, &project.slug, rec);
     let args = projects::with_initial_prompt(args, rec, prompt);
+    projects::preapprove_claude_startup(&home, &cwd);
     supervisor.spawn_with_slug(
         app.clone(),
         rec.id.clone(),

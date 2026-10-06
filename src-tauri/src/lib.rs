@@ -98,6 +98,9 @@ fn pty_spawn(
         }
         None => (args, Vec::new()),
     };
+    if let Ok(home) = home_dir(&app) {
+        projects::preapprove_claude_startup(&home, &cwd);
+    }
     sup.spawn_with_slug(app, id, project_id, project_slug, kind, cwd, program, args, env, cols, rows)
         .map_err(|e| e.to_string())
 }
@@ -780,6 +783,7 @@ fn agent_start(
     let args = projects::chat_args_for(&home, &rec, &cwd, &opts);
     let args = projects::with_project_memory(args, &home, &project_slug, &rec);
     let env = ops::launch_env(&home, &rec).map_err(|e| e.to_string())?;
+    projects::preapprove_claude_startup(&home, &cwd);
     let spec = SpawnSpec {
         id,
         project_id: rec.project_id.clone(),

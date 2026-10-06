@@ -961,12 +961,68 @@ const CLAUDE_STARTUP_APPROVALS: &[&str] = &[
     "hasClaudeMdExternalIncludesWarningShown",
 ];
 
+/// Every `projects` key Claude Code may read those flags from when it starts
+/// in `path`. It resolves symlinks, and keys a folder inside a git repo by the
+/// repo root, a linked worktree by the root of its main repo. The path as
+/// given stays in too: the trust check walks up from the cwd itself.
+pub fn claude_config_keys(path: &str) -> Vec<String> {
+    let trimmed = path.trim_end_matches('/');
+    let given = if trimmed.is_empty() { path } else { trimmed };
+    if given.is_empty() {
+        return Vec::new();
+    }
+    #[cfg(unix)]
+    let real = std::fs::canonicalize(given).unwrap_or_else(|_| PathBuf::from(given));
+    #[cfg(not(unix))]
+    let real = PathBuf::from(given);
+    let mut keys = vec![given.to_string(), real.to_string_lossy().into_owned()];
+    if let Some((top, main)) = git_roots(&real) {
+        keys.push(top.to_string_lossy().into_owned());
+        keys.push(main.to_string_lossy().into_owned());
+    }
+    let mut seen = std::collections::HashSet::new();
+    keys.retain(|k| seen.insert(k.clone()));
+    keys
+}
+
+/// The working tree `start` sits in and the main repo behind it. They differ
+/// only for a linked worktree, whose `.git` is a file pointing into the main
+/// repo's `.git/worktrees/<name>`.
+fn git_roots(start: &Path) -> Option<(PathBuf, PathBuf)> {
+    for dir in start.ancestors() {
+        let dot = dir.join(".git");
+        if dot.is_dir() {
+            return Some((dir.to_path_buf(), dir.to_path_buf()));
+        }
+        if dot.is_file() {
+            let main = linked_main_root(dir, &dot).unwrap_or_else(|| dir.to_path_buf());
+            return Some((dir.to_path_buf(), main));
+        }
+    }
+    None
+}
+
+fn linked_main_root(dir: &Path, dot_git: &Path) -> Option<PathBuf> {
+    let text = std::fs::read_to_string(dot_git).ok()?;
+    let gitdir = text.lines().find_map(|l| l.strip_prefix("gitdir:"))?.trim();
+    let gitdir = dir.join(gitdir);
+    let common = std::fs::read_to_string(gitdir.join("commondir")).ok()?;
+    let common = std::fs::canonicalize(gitdir.join(common.trim())).ok()?;
+    if common.file_name()? != ".git" {
+        return None;
+    }
+    common.parent().map(Path::to_path_buf)
+}
+
 /// Pre-approve Claude Code's startup dialogs (see `CLAUDE_STARTUP_APPROVALS`)
-/// by writing each flag as `true` into `~/.claude.json` for each
-/// path. Best-effort: if `~/.claude.json` is missing or unparseable we just
-/// return — the user can still accept manually. The point is to unblock remote
-/// flows (e.g. Telegram) where the modal sits on a freshly-spawned agent that
-/// the user can't see or click.
+/// by writing each flag as `true` into `~/.claude.json` under every key
+/// `claude_config_keys` gives for each path. Runs before every spawn, not
+/// only when a project is born: Claude Code rewrites the file from its own
+/// sessions and folders change after creation. Best-effort: if
+/// `~/.claude.json` is missing or unparseable we just return — the user can
+/// still accept manually. The point is to unblock remote flows (e.g.
+/// Telegram) where the modal sits on a freshly-spawned agent that the user
+/// can't see or click.
 pub fn mark_paths_trusted_in_claude_json(home: &Path, paths: &[String]) -> Result<()> {
     let cfg = home.join(".claude.json");
     if !cfg.exists() {
@@ -975,17 +1031,20 @@ pub fn mark_paths_trusted_in_claude_json(home: &Path, paths: &[String]) -> Resul
     let raw = std::fs::read_to_string(&cfg).context("reading ~/.claude.json")?;
     let mut json: serde_json::Value =
         serde_json::from_str(&raw).context("parsing ~/.claude.json")?;
-    let Some(projects) = json
+    let Some(root) = json.as_object_mut() else {
+        return Ok(());
+    };
+    let Some(projects) = root
+        .entry("projects")
+        .or_insert_with(|| serde_json::json!({}))
         .as_object_mut()
-        .and_then(|o| o.get_mut("projects"))
-        .and_then(|p| p.as_object_mut())
     else {
         return Ok(());
     };
     let mut changed = false;
-    for key in paths {
+    for key in paths.iter().flat_map(|p| claude_config_keys(p)) {
         let entry = projects
-            .entry(key.clone())
+            .entry(key)
             .or_insert_with(|| serde_json::json!({}));
         let Some(obj) = entry.as_object_mut() else {
             continue;
@@ -1002,9 +1061,22 @@ pub fn mark_paths_trusted_in_claude_json(home: &Path, paths: &[String]) -> Resul
         let tmp = cfg.with_extension("json.cosmos-tmp");
         let pretty = serde_json::to_string_pretty(&json).context("encoding ~/.claude.json")?;
         std::fs::write(&tmp, pretty).context("writing tmp ~/.claude.json")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+        }
         std::fs::rename(&tmp, &cfg).context("renaming tmp ~/.claude.json")?;
     }
     Ok(())
+}
+
+/// `mark_paths_trusted_in_claude_json` for the folder a runner is about to
+/// start in. Never fails a spawn.
+pub fn preapprove_claude_startup(home: &Path, cwd: &str) {
+    if let Err(e) = mark_paths_trusted_in_claude_json(home, &[cwd.to_string()]) {
+        eprintln!("cosmos: failed to pre-approve Claude startup dialogs: {e}");
+    }
 }
 
 pub fn dedupe_folders(folders: Vec<String>) -> Vec<String> {
@@ -1276,5 +1348,106 @@ mod tests {
         assert_eq!(moved[0].0, "long-gone");
         assert!(!orphan.exists());
         assert!(project_dir(&home, &kept.slug).exists());
+    }
+
+    fn claude_flags(home: &Path, key: &str) -> Vec<bool> {
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap();
+        CLAUDE_STARTUP_APPROVALS
+            .iter()
+            .map(|f| json["projects"][key][*f].as_bool().unwrap_or(false))
+            .collect()
+    }
+
+    fn real(p: &Path) -> String {
+        std::fs::canonicalize(p).unwrap().to_string_lossy().into_owned()
+    }
+
+    fn git_in(dir: &Path, args: &[&str]) {
+        let ok = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.email=t@t", "-c", "user.name=t"])
+            .args(args)
+            .output()
+            .unwrap()
+            .status
+            .success();
+        assert!(ok, "git {args:?}");
+    }
+
+    /// Trust alone still leaves the "allow external CLAUDE.md file imports"
+    /// prompt up: all three flags have to land, on a folder Claude Code has
+    /// never seen and on one it only half knows.
+    #[test]
+    fn startup_approval_writes_the_three_flags() {
+        let home = fresh_home("approve");
+        let seen = home.join("seen");
+        let fresh = home.join("fresh");
+        std::fs::create_dir_all(&seen).unwrap();
+        std::fs::create_dir_all(&fresh).unwrap();
+        let (seen, fresh) = (real(&seen), real(&fresh));
+        let cfg = serde_json::json!({
+            "numStartups": 7,
+            "projects": { seen.clone(): { "hasTrustDialogAccepted": true, "allowedTools": ["Bash"] } }
+        });
+        std::fs::write(home.join(".claude.json"), cfg.to_string()).unwrap();
+
+        mark_paths_trusted_in_claude_json(&home, &[seen.clone(), fresh.clone()]).unwrap();
+
+        assert_eq!(claude_flags(&home, &seen), vec![true, true, true]);
+        assert_eq!(claude_flags(&home, &fresh), vec![true, true, true]);
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(home.join(".claude.json")).unwrap()).unwrap();
+        assert_eq!(json["numStartups"], 7);
+        assert_eq!(json["projects"][&seen]["allowedTools"][0], "Bash");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(home.join(".claude.json")).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+    }
+
+    #[test]
+    fn startup_approval_creates_a_missing_projects_map_and_skips_a_missing_file() {
+        let home = fresh_home("approve-empty");
+        mark_paths_trusted_in_claude_json(&home, &["/x".into()]).unwrap();
+        assert!(!home.join(".claude.json").exists());
+
+        std::fs::write(home.join(".claude.json"), "{}").unwrap();
+        mark_paths_trusted_in_claude_json(&home, &["/x/".into()]).unwrap();
+        assert_eq!(claude_flags(&home, "/x"), vec![true, true, true]);
+    }
+
+    /// Claude Code keys a linked worktree, and any folder inside a repo, by
+    /// the root of the main repo. Flags on the worktree path alone leave the
+    /// import prompt up.
+    #[cfg(unix)]
+    #[test]
+    fn startup_approval_reaches_the_repo_behind_a_worktree_and_a_subfolder() {
+        let home = fresh_home("approve-git");
+        let repo = home.join("repo");
+        std::fs::create_dir_all(repo.join("sub")).unwrap();
+        std::fs::write(repo.join("sub/a.txt"), "a").unwrap();
+        git_in(&repo, &["init", "-q"]);
+        git_in(&repo, &["add", "-A"]);
+        git_in(&repo, &["commit", "-qm", "init"]);
+        let wt = home.join("wt");
+        git_in(&repo, &["worktree", "add", "-q", "-b", "side", wt.to_str().unwrap()]);
+        let link = home.join("link");
+        std::os::unix::fs::symlink(&wt, &link).unwrap();
+        let (repo_key, wt_key) = (real(&repo), real(&wt));
+
+        assert_eq!(
+            claude_config_keys(&format!("{}/sub", repo.to_string_lossy())),
+            vec![format!("{}/sub", repo.to_string_lossy()), format!("{repo_key}/sub"), repo_key.clone()]
+        );
+
+        std::fs::write(home.join(".claude.json"), "{\"projects\":{}}").unwrap();
+        mark_paths_trusted_in_claude_json(&home, &[link.to_string_lossy().into_owned()]).unwrap();
+        for key in [link.to_string_lossy().as_ref(), wt_key.as_str(), repo_key.as_str()] {
+            assert_eq!(claude_flags(&home, key), vec![true, true, true], "{key}");
+        }
     }
 }
