@@ -30,6 +30,26 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
   headless terminal emulator per PTY (`screen.rs`), polled only for cards
   on screen; cost is an estimate from list prices over the tokens in Claude
   Code's transcript (`usage.rs`).
+- **Cérebro** (`⌘⇧B`) — one vault over what the agents already know,
+  without copying anything: agent memories
+  (`~/.claude/projects/*/memory`), every `CLAUDE.md`, the guidelines, the
+  dev logs and Cosmos' own notes (`~/.cosmos/brain`). `[[name]]` and
+  relative Markdown links are the graph; each note shows who cites it, with
+  the line, and what it cites, and a link with no note offers to create it.
+  The graph is alive: hover lights a note and its neighbours, click
+  selects, double click opens; filter by source or tag. Search (`/`) covers
+  titles, names, descriptions and bodies, with `tag:` and `fonte:`. Notes
+  read rendered and edit in place (`⌘E`, `⌘S`); one an agent changed
+  meanwhile is never silently overwritten. Agents use the same vault from
+  the terminal (`brain.rs`), and the app refreshes when they write:
+
+  ```sh
+  cosmos brain search <words> [tag:<tag>] [fonte:memory|claude|guideline|devlog|note]
+  cosmos brain read <name or path>     # the note, who cites it, what it cites
+  cosmos brain list [--source note] [--tag x]
+  cosmos brain new "<title>" --tag <tag> --description "<when it matters>" --body -
+  cosmos brain append <name> "<text>"
+  ```
 - **Routing** — `cosmos route <task>` is the same ranking the composer
   previews (`router.rs`): projects by folder and name, agents by the history
   they hold, liveness and recency, plus a model pick (Opus for architecture
@@ -134,6 +154,7 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
 | `⌘⇧W` | stop every runner of the project |
 | `⌘1–9` | focus N-th project |
 | `⌘0` / `⌘⇧H` | home / Hub |
+| `⌘⇧C` / `⌘⇧B` | canvas / brain |
 | `⌘B` | collapse / pin the sidebar (collapsed, it opens on hover) |
 | `⌘E` | project tools (overview → files → diff → memory → browser) |
 | `⌘P` / `⌘⇧F` | file palette / grep |
