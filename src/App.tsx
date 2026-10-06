@@ -17,6 +17,7 @@ import { MessageSquare, SquareTerminal } from "lucide-solid";
 import TopStrip, { ChildStrip } from "./components/TopStrip";
 import HubView from "./components/HubView";
 import HomeView from "./components/HomeView";
+import CanvasView from "./components/CanvasView";
 import SideNav from "./components/SideNav";
 import ProjectView from "./components/ProjectView";
 import NewAgentModal from "./components/NewAgentModal";
@@ -159,6 +160,11 @@ export default function App() {
         go({ kind: "hub" });
         return;
       }
+      if (key === "c" && e.shiftKey) {
+        e.preventDefault();
+        go({ kind: "canvas" });
+        return;
+      }
       if (e.key === "0") {
         e.preventDefault();
         go({ kind: "home" });
@@ -256,6 +262,9 @@ export default function App() {
       <main class="relative flex min-h-0 min-w-0 flex-1 flex-col bg-void">
           <Show when={route().kind === "home"}>
             <HomeView />
+          </Show>
+          <Show when={route().kind === "canvas"}>
+            <CanvasView />
           </Show>
           <Show when={route().kind === "hub"}>
             <HubView />

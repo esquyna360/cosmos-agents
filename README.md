@@ -19,6 +19,17 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
   new one starts in the right project, or it solves it itself — and on which
   model. A line under the text shows where the task would go and why, as you
   type. Picking a project pill instead creates an agent there directly.
+- **Canvas** (`⌘⇧C`) — every agent and terminal as a live card on an
+  endless board: state, what it is doing, model, context size, estimated
+  cost and a miniature of its real screen. Cards sit inside their project,
+  and a line runs from whoever delegated (usually the Hub) to whoever got
+  the work, animated while that agent is busy. Drag to pan, pinch or
+  `⌘`+scroll to zoom, drag a card to move it, click it to grow it into the
+  full terminal (`⇧esc` goes back). A bar at the bottom talks to the Hub.
+  Zoomed out, cards fold to name and state. The miniatures come from a
+  headless terminal emulator per PTY (`screen.rs`), polled only for cards
+  on screen; cost is an estimate from list prices over the tokens in Claude
+  Code's transcript (`usage.rs`).
 - **Routing** — `cosmos route <task>` is the same ranking the composer
   previews (`router.rs`): projects by folder and name, agents by the history
   they hold, liveness and recency, plus a model pick (Opus for architecture

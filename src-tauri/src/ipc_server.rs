@@ -188,7 +188,9 @@ fn dispatch(app: &AppHandle, req: Request) -> Response {
             name,
             id,
             message,
+            from,
         } => resolve_runner(app, project.as_deref(), name.as_deref(), id.as_deref())
+            .and_then(|r| ops::delegated(app, r, from.as_deref().unwrap_or("")))
             .and_then(|r| ops::send(app, &r, &message)),
         Request::RunnerStop { project, name, id } => {
             resolve_runner(app, project.as_deref(), name.as_deref(), id.as_deref())

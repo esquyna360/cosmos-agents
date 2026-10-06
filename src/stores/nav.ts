@@ -1,13 +1,14 @@
 import { createSignal } from "solid-js";
 
 /**
- * Where the window is. Two fixed places (home, Hub), then whatever
+ * Where the window is. Three fixed places (home, canvas, Hub), then whatever
  * project or session is open. Deliberately free of imports from the projects
  * store, so that store can navigate without a cycle.
  */
 export type Route =
   | { kind: "home" }
   | { kind: "hub" }
+  | { kind: "canvas" }
   | { kind: "project"; projectId: string }
   | { kind: "session"; projectId: string; runnerId: string };
 

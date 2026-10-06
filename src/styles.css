@@ -897,3 +897,245 @@ button:focus-visible,
   background: var(--accent-soft);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
+
+/* Canvas: an endless board of live cards. The layer is one transformed
+   element; cards only move when dragged or tidied. */
+.cx-canvas {
+  background-color: var(--void);
+  background-image: radial-gradient(circle, var(--fill-3) 1px, transparent 1.5px);
+  touch-action: none;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+}
+.cx-canvas[data-panning="true"] {
+  cursor: grabbing;
+}
+.cx-canvas-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+}
+.cx-node,
+.cx-frame {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transition:
+    transform 0.42s cubic-bezier(0.2, 0.8, 0.2, 1),
+    width 0.42s cubic-bezier(0.2, 0.8, 0.2, 1),
+    height 0.42s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.cx-node-drag,
+.cx-canvas[data-dragging="true"] .cx-frame {
+  transition: none;
+}
+.cx-node-drag {
+  z-index: 5;
+}
+.cx-frame {
+  border-radius: 24px;
+  border: 1px dashed var(--line-strong);
+  background: var(--fill-1);
+  pointer-events: none;
+}
+.cx-frame-label {
+  position: absolute;
+  left: 18px;
+  top: 12px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 16px;
+  line-height: 1.2;
+  color: var(--text-dim);
+  pointer-events: auto;
+  transition: color 0.15s;
+}
+.cx-frame-label:hover {
+  color: var(--text);
+}
+@keyframes cx-node-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+}
+@keyframes cx-node-call {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0 var(--busy-soft),
+      var(--shadow-1);
+  }
+  50% {
+    box-shadow:
+      0 0 0 9px var(--busy-soft),
+      var(--shadow-1);
+  }
+}
+@keyframes cx-node-ping {
+  0% {
+    box-shadow:
+      0 0 0 0 var(--accent),
+      var(--shadow-1);
+  }
+  100% {
+    box-shadow:
+      0 0 0 22px transparent,
+      var(--shadow-1);
+  }
+}
+.cx-node-face {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow-1);
+  cursor: pointer;
+  animation: cx-node-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.25s,
+    transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.cx-node:hover .cx-node-face {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-2px);
+}
+.cx-node-drag .cx-node-face,
+.cx-node-drag:hover .cx-node-face {
+  cursor: grabbing;
+  box-shadow: var(--shadow-2);
+  transform: scale(1.025);
+}
+.cx-node-face[data-tone="working"] {
+  border-color: color-mix(in srgb, var(--live) 42%, var(--line));
+}
+.cx-node-face[data-tone="unread"] {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+}
+.cx-node-face[data-tone="error"] {
+  border-color: var(--alert);
+}
+.cx-node-face[data-tone="awaiting"] {
+  border-color: var(--busy);
+  animation:
+    cx-node-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both,
+    cx-node-call 1.9s ease-in-out 0.3s infinite;
+}
+.cx-node-face[data-hub="true"] {
+  background: linear-gradient(155deg, color-mix(in srgb, var(--accent) 16%, var(--raised)), var(--raised) 58%);
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--line));
+}
+.cx-node-face[data-ping="true"] {
+  animation: cx-node-ping 0.7s ease-out 2;
+}
+.cx-mini {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--term-bg);
+}
+.cx-mini pre {
+  margin: 0;
+  padding: 6px 9px;
+  font:
+    8.5px/11.5px "JetBrains Mono Variable",
+    ui-monospace,
+    monospace;
+  color: var(--term-fg);
+  white-space: pre;
+}
+.cx-mini::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 30px;
+  background: linear-gradient(90deg, transparent, var(--term-bg));
+}
+.cx-mini-off {
+  margin: auto;
+  padding: 0 16px;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--term-fg);
+  opacity: 0.38;
+}
+.cx-edge {
+  fill: none;
+  stroke: var(--line-strong);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.cx-edge-end {
+  fill: var(--void);
+  stroke: var(--line-strong);
+  stroke-width: 1.6;
+}
+@keyframes cx-edge-flow {
+  to {
+    stroke-dashoffset: -15;
+  }
+}
+[data-tone="working"] > .cx-edge {
+  stroke: var(--live);
+  stroke-width: 2;
+  stroke-dasharray: 5 10;
+  animation: cx-edge-flow 0.8s linear infinite;
+}
+[data-tone="working"] > .cx-edge-end {
+  stroke: var(--live);
+  fill: var(--live);
+}
+[data-tone="awaiting"] > .cx-edge,
+[data-tone="awaiting"] > .cx-edge-end {
+  stroke: var(--busy);
+}
+/* Zoomed out, a card is its name and its state. */
+.cx-canvas[data-far="true"] .cx-node-detail {
+  display: none;
+}
+.cx-canvas[data-far="true"] .cx-node-face {
+  justify-content: center;
+  gap: 14px;
+}
+.cx-canvas[data-far="true"] .cx-node-face > header {
+  padding: 0 22px;
+}
+.cx-canvas[data-far="true"] .cx-node-face > div {
+  padding: 0 22px;
+  font-size: 22px;
+}
+.cx-canvas[data-far="true"] .cx-node-name {
+  font-size: 34px;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+.cx-canvas[data-far="true"] .cx-frame-label {
+  font-size: 34px;
+  top: -4px;
+}
+.cx-hubbar:focus-within {
+  border-color: var(--accent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cx-node,
+  .cx-frame,
+  .cx-node-face,
+  .cx-edge {
+    animation: none !important;
+    transition: none !important;
+  }
+}

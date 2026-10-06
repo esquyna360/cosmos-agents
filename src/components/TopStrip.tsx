@@ -59,6 +59,14 @@ export default function TopStrip() {
             </span>
           </Show>
         </button>
+        <button
+          class="cx-pill"
+          data-on={route().kind === "canvas"}
+          title="Todos os agentes num quadro (⌘⇧C)"
+          onClick={() => go({ kind: "canvas" })}
+        >
+          Canvas
+        </button>
         <button class="cx-pill" data-on={route().kind === "hub"} onClick={() => go({ kind: "hub" })}>
           Hub
         </button>

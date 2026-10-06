@@ -103,6 +103,9 @@ pub enum Request {
         #[serde(default)]
         id: Option<String>,
         message: String,
+        /// Runner that is sending, when it is an agent delegating.
+        #[serde(default)]
+        from: Option<String>,
     },
     /// Stop a runner's process; the row and its session stay.
     RunnerStop {

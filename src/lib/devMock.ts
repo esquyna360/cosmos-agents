@@ -91,6 +91,34 @@ const RUNNERS = (
   parent_id: id === "r3" || id === "r6" ? "r0" : "",
 }));
 
+// `?stress=40` fills the board, to check the canvas with dozens of cards.
+const STRESS = Number(new URLSearchParams(location.search).get("stress") ?? 0);
+for (let i = 0; i < STRESS; i++) {
+  const pi = Math.floor(i / 6);
+  if (i % 6 === 0)
+    PROJECTS.push({
+      id: `p-x${pi}`,
+      name: `Projeto ${pi + 1}`,
+      slug: `projeto-${pi + 1}`,
+      folders: [`/Users/bruno/code/apps/projeto-${pi + 1}`],
+      memory: "",
+      cwd: `/Users/bruno/code/apps/projeto-${pi + 1}`,
+      created_at: now - 86_400,
+    });
+  (RUNNERS as unknown[]).push({
+    ...RUNNERS[0],
+    id: `x${i}`,
+    project_id: `p-x${pi}`,
+    name: `Tarefa ${i + 1} do projeto ${pi + 1}`,
+    task: "Uma tarefa de teste para encher o quadro.",
+    session_id: `sess-x${i}`,
+    last_active: now - 30 * i,
+    model: ["opus", "sonnet", "haiku"][i % 3],
+    provider: "",
+    parent_id: i % 4 === 0 ? "r0" : i % 7 === 0 ? `x${i - 1}` : "",
+  });
+}
+
 const STATUSES: Record<string, string> = {
   r1: "tool_running",
   r2: "running",
@@ -273,7 +301,7 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
     })),
   projects_list: () => PROJECTS,
   runners_list: () => RUNNERS,
-  pty_live_ids: () => Object.keys(STATUSES),
+  pty_live_ids: () => [...Object.keys(STATUSES), ...RUNNERS.filter((r) => r.id.startsWith("x")).map((r) => r.id)],
   app_version: () => "0.3.0",
   web_info: () => ({
     port: 7777,
@@ -309,6 +337,56 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
       ],
     },
   ],
+  runners_vitals: () => {
+    const out: Record<string, unknown> = {};
+    RUNNERS.filter((r) => r.kind === "agent").forEach((r, i) => {
+      out[r.id] = {
+        inputTokens: 4200 * (i + 1),
+        outputTokens: 900 * (i + 1),
+        cacheReadTokens: 61000 * (i + 1),
+        cacheWriteTokens: 8000,
+        contextTokens: 18000 + ((i * 37_000) % 160_000),
+        costUsd: r.id === "r7" ? 0 : 0.18 + ((i * 1.37) % 9),
+        model: r.provider ? r.model : "claude-sonnet-5-5",
+        title: "",
+        last: ({
+          r1: "Rodando pod install com o Firebase 12 para reproduzir o erro.",
+          r3: "Os tipos passam. Vale testar mandando duas mensagens seguidas.",
+          r4: "Posso publicar a tag v0.4.0?",
+          r0: "Mandei o build iOS para o agente do Metamorfosis.",
+        } as Record<string, string>)[r.id] ?? "",
+      };
+    });
+    return out;
+  },
+  pty_screens: (args) => {
+    const tick = Math.floor(Date.now() / 900);
+    const seen = (args.seen ?? {}) as Record<string, number>;
+    return (args.ids as string[])
+      .map((id, n) => {
+        const working = STATUSES[id] === "tool_running" || STATUSES[id] === "streaming" || id.startsWith("x");
+        const ver = working ? tick : 1;
+        const bar = "█".repeat((tick + n) % 24).padEnd(24, "░");
+        return {
+          id,
+          ver,
+          cols: 120,
+          lines: [
+            [{ t: "⏺ ", c: "2" }, { t: "Read", b: true }, { t: "(src/stores/chat.ts)" }],
+            [{ t: "  ⎿  Read 828 lines", d: true }],
+            [{ t: "⏺ ", c: "2" }, { t: "Bash", b: true }, { t: "(pnpm exec tsc --noEmit)" }],
+            [{ t: `  ⎿  ${bar} ${working ? ((tick + n) % 24) * 4 : 100}%`, d: true }],
+            [],
+            [{ t: working ? "✻ Verificando os tipos… " : "⏺ Os tipos passam. ", c: working ? "#e6935e" : undefined }, { t: working ? `(${(tick % 90) + 3}s · esc to interrupt)` : "", d: true }],
+            [],
+            [{ t: "╭──────────────────────────────────────────────────────────────────────────╮", d: true }],
+            [{ t: "│ ", d: true }, { t: "> " }, { t: "                                                                        │", d: true }],
+            [{ t: "╰──────────────────────────────────────────────────────────────────────────╯", d: true }],
+          ],
+        };
+      })
+      .filter((s) => seen[s.id] !== s.ver);
+  },
   route_suggest: (args) => {
     const task = String(args.task ?? "").toLowerCase();
     const deep = /arquitet|decis|plano|investig/.test(task);

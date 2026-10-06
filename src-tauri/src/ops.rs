@@ -173,6 +173,30 @@ pub fn set_model(app: &AppHandle, target: &RunnerRecord, provider: &str, model: 
     Ok(rec)
 }
 
+/// Records that `from` handed work to `target`, which is what the canvas
+/// draws a line for. An answer going back up the chain is not a delegation,
+/// and nobody delegates to the hub.
+pub fn delegated(app: &AppHandle, target: RunnerRecord, from: &str) -> Result<RunnerRecord> {
+    if from.is_empty() || from == target.id || from == target.parent_id {
+        return Ok(target);
+    }
+    let store = app.state::<Store>();
+    let Some(sender) = store.runners_get(from)? else { return Ok(target) };
+    let to_hub = project_of(app, &target).is_ok_and(|p| is_master_project(&p))
+        && target.name.eq_ignore_ascii_case(MASTER_NAME);
+    if sender.parent_id == target.id || to_hub {
+        return Ok(target);
+    }
+    let mut rec = target;
+    rec.parent_id = from.to_string();
+    store.runners_upsert(&projects::runner_record_to_row(&rec)?)?;
+    let _ = app.emit(
+        "runners-changed",
+        json!({ "reason": "ops.delegated", "projectId": rec.project_id }),
+    );
+    Ok(rec)
+}
+
 /* ------------------------------ transcript ------------------------------ */
 
 #[derive(Serialize, Clone, Debug, PartialEq)]

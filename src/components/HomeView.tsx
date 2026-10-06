@@ -1,5 +1,5 @@
 import { projectLabel } from "../lib/projectLabel";
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, Show } from "solid-js";
 import { ArrowUp, CornerDownRight, Ellipsis, GitBranch, SlidersHorizontal, Waypoints } from "lucide-solid";
 
 import {
@@ -13,6 +13,7 @@ import {
   type RunnerUI,
 } from "../stores/projects";
 import { statsOf } from "../stores/chat";
+import { fmtCost, fmtTokens, vitalsOf, watchVitals } from "../stores/vitals";
 import { launchAgent } from "../stores/launch";
 import { openCreator } from "../stores/creator";
 import { gitOf } from "../stores/git";
@@ -41,6 +42,7 @@ export default function HomeView() {
   const [stale, setStale] = createSignal(false);
   const [projectId, setProjectId] = createSignal<string | null>(null);
   ensureModels();
+  onCleanup(watchVitals());
 
   const keep = (r: RunnerUI) =>
     r.id !== masterRunner()?.id &&
@@ -150,6 +152,7 @@ function Row(props: { project: ProjectUI; runner: RunnerUI }) {
   const shell = () => r().kind === "shell";
   const state = () => stateOf(r());
   const stats = () => (shell() ? null : statsOf(r().id));
+  const vitals = () => (shell() ? undefined : vitalsOf(r().id));
   const pct = () => {
     const s = stats();
     return s && s.contextWindow > 0 ? Math.min(100, Math.round((s.contextTokens / s.contextWindow) * 100)) : null;
@@ -194,7 +197,14 @@ function Row(props: { project: ProjectUI; runner: RunnerUI }) {
         </Show>
       </span>
       <span class="flex items-center gap-1.5">
-        <Show when={pct() !== null} fallback={<span class="text-faint">–</span>}>
+        <Show
+          when={pct() !== null}
+          fallback={
+            <span class="tabular-nums text-faint">
+              {vitals()?.contextTokens ? fmtTokens(vitals()!.contextTokens) : "–"}
+            </span>
+          }
+        >
           <span class="h-1 flex-1 overflow-hidden rounded-full bg-fill-2">
             <span
               class="block h-full rounded-full"
@@ -206,7 +216,9 @@ function Row(props: { project: ProjectUI; runner: RunnerUI }) {
         </Show>
       </span>
       <span class="text-right tabular-nums text-dim">
-        {stats() && stats()!.costUsd > 0 ? `$${stats()!.costUsd.toFixed(2)}` : "–"}
+        {stats() && stats()!.costUsd > 0
+          ? `$${stats()!.costUsd.toFixed(2)}`
+          : fmtCost(vitals()?.costUsd ?? 0) || "–"}
       </span>
       <span class="text-right text-[11.5px] text-faint">{relativeTime(r().lastActive)}</span>
       <button

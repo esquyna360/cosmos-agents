@@ -38,8 +38,14 @@ impl Screen {
         Self { parser: vt100::Parser::new(rows.max(2), cols.max(2), 0), ver: 0 }
     }
 
+    /// Runs on the PTY reader thread, so an emulator bug must never take the
+    /// terminal down with it: on a panic the screen starts over, blank.
     pub fn feed(&mut self, chunk: &[u8]) {
-        self.parser.process(chunk);
+        let fed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.parser.process(chunk)));
+        if fed.is_err() {
+            let (rows, cols) = self.parser.screen().size();
+            self.parser = vt100::Parser::new(rows, cols, 0);
+        }
         self.ver += 1;
     }
 
@@ -134,6 +140,21 @@ mod tests {
         let before = s.ver();
         s.resize(30, 4);
         assert!(s.ver() > before);
+    }
+
+    /// `COSMOS_CAPTURE=<file> cargo test real_capture -- --ignored --nocapture`
+    /// prints what a recorded PTY stream ends up looking like.
+    #[test]
+    #[ignore]
+    fn real_capture() {
+        let path = std::env::var("COSMOS_CAPTURE").expect("COSMOS_CAPTURE");
+        let mut s = Screen::new(120, 40);
+        for chunk in std::fs::read(path).unwrap().chunks(977) {
+            s.feed(chunk);
+        }
+        for line in text(&s.tail(14).1) {
+            println!("|{line}");
+        }
     }
 
     #[test]
