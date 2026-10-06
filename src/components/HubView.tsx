@@ -41,10 +41,10 @@ export default function HubView() {
       fallback={<p class="p-8 text-[13px] text-dim">O Hub ainda está subindo.</p>}
     >
       <div class="flex min-h-0 flex-1 flex-col">
-        <header class="flex shrink-0 flex-col gap-2.5 border-b border-line px-6 py-3.5">
+        <header class="cx-hub-head flex shrink-0 flex-col gap-2.5 border-b border-line px-6 py-3.5">
           <div class="flex items-baseline gap-3">
             <h1 class="font-heading text-[22px] leading-none text-ink">Hub</h1>
-            <p class="text-[12.5px] text-dim">
+            <p class="min-w-0 text-[12.5px] text-dim">
               Peça em português. Ele cria projetos, sobe e para agentes e responde sobre{" "}
               {count() === 1 ? "o seu projeto" : `os seus ${count()} projetos`}.
             </p>
@@ -68,7 +68,7 @@ export default function HubView() {
               </button>
             </div>
           </div>
-          <div class="flex flex-wrap gap-1.5">
+          <div class="cx-hub-asks flex flex-wrap gap-1.5">
             <For each={SUGGESTIONS}>
               {(s) => (
                 <button class="cx-chip-add bg-fill-2 text-dim hover:text-ink" onClick={() => ask(s)}>

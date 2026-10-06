@@ -1,4 +1,4 @@
-import { createEffect, createSignal, on, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -12,6 +12,21 @@ import { markRunnerLive } from "../stores/projects";
 import { readTerminalPalette, themeTick } from "../stores/theme";
 import { setTermFontSize, termFontSize } from "../stores/layout";
 import type { RunnerUI } from "../stores/projects";
+import { isWeb } from "../lib/platform";
+
+/** What a phone's keyboard does not have and a TUI cannot live without. */
+const TOUCH_KEYS: { label: string; send: string; title: string }[] = [
+  { label: "esc", send: "\x1b", title: "Escape" },
+  { label: "tab", send: "\t", title: "Tab" },
+  { label: "⇧tab", send: "\x1b[Z", title: "Shift+Tab" },
+  { label: "↑", send: "\x1b[A", title: "Seta para cima" },
+  { label: "↓", send: "\x1b[B", title: "Seta para baixo" },
+  { label: "←", send: "\x1b[D", title: "Seta para a esquerda" },
+  { label: "→", send: "\x1b[C", title: "Seta para a direita" },
+  { label: "^C", send: "\x03", title: "Interromper (Ctrl+C)" },
+  { label: "⏎", send: "\r", title: "Enter" },
+];
+const touch = isWeb && window.matchMedia("(pointer: coarse)").matches;
 
 interface Props {
   runner: RunnerUI;
@@ -60,7 +75,7 @@ export default function Terminal(props: Props) {
   onMount(async () => {
     const t = new XTerm({
       fontFamily: '"JetBrains Mono Variable", "Fira Code", ui-monospace, monospace',
-      fontSize: termFontSize(),
+      fontSize: touch ? Math.min(termFontSize(), 12) : termFontSize(),
       lineHeight: 1.25,
       theme: readTerminalPalette(),
       cursorBlink: true,
@@ -228,8 +243,25 @@ export default function Terminal(props: Props) {
   });
 
   return (
-    <div class="relative flex min-h-0 min-w-0 flex-1 bg-[var(--term-bg)]">
+    <div class="relative flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--term-bg)]">
       <div ref={host} class="min-h-0 min-w-0 flex-1 py-2 pl-3.5 pr-1" />
+      <Show when={touch}>
+        <div class="cx-term-keys">
+          <For each={TOUCH_KEYS}>
+            {(k) => (
+              <button
+                title={k.title}
+                aria-label={k.title}
+                // Keep the on-screen keyboard where it is.
+                onPointerDown={(e) => e.preventDefault()}
+                onClick={() => ptyWrite(id, k.send).catch(console.error)}
+              >
+                {k.label}
+              </button>
+            )}
+          </For>
+        </div>
+      </Show>
       <Show when={finding()}>
         <div class="cx-glass cx-sheet absolute right-4 top-2 z-10 flex items-center gap-1 rounded-cx border border-line-strong p-1">
           <input

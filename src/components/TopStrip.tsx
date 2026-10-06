@@ -15,7 +15,7 @@ import {
 import { closeTab, go, navMode, openTabs, route, routeProjectId, setNavMode } from "../stores/nav";
 import { openCreator } from "../stores/creator";
 import { openJump } from "../stores/jump";
-import { setSettingsOpen, sidebarOpen } from "../stores/layout";
+import { compact, setSettingsOpen, sidebarOpen } from "../stores/layout";
 import { cycleTheme, themeSpec } from "../stores/theme";
 import { webInfo, type WebInfo } from "../lib/remote";
 import { isWeb } from "../lib/platform";
@@ -49,7 +49,7 @@ export default function TopStrip() {
       class="cx-strip flex h-[var(--strip-h)] shrink-0 items-center gap-1 border-b border-line bg-panel pr-2.5"
       classList={{ "pl-[84px]": !isWeb, "pl-2.5": isWeb }}
     >
-      <nav class="flex shrink-0 items-center gap-0.5">
+      <nav class="cx-strip-nav flex shrink-0 items-center gap-0.5">
         <button class="cx-pill" data-on={route().kind === "home"} onClick={() => go({ kind: "home" })}>
           Início
           <Show when={waiting() > 0}>
@@ -82,11 +82,11 @@ export default function TopStrip() {
         </button>
       </nav>
 
-      <Show when={navMode() === "tabs" && tabs().length > 0}>
+      <Show when={navMode() === "tabs" && tabs().length > 0 && !compact()}>
         <span class="mx-1.5 h-4 w-px shrink-0 bg-line-strong" />
       </Show>
 
-      <Show when={navMode() === "tabs"}>
+      <Show when={navMode() === "tabs" && !compact()}>
         <div class="flex min-w-0 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]">
           <For each={tabs()}>{(p) => <ProjectTabPill project={p} />}</For>
         </div>
@@ -113,7 +113,7 @@ export default function TopStrip() {
         </button>
       </Show>
 
-      <Show when={crumb()}>
+      <Show when={!compact() && crumb()}>
         {(r) => (
           <span class="ml-1 flex min-w-0 items-center gap-1 text-[12.5px] text-dim" data-tauri-drag-region>
             <ChevronRight size={12} class="shrink-0 text-faint" />
@@ -126,27 +126,40 @@ export default function TopStrip() {
         <Show when={!isWeb}>
           <Remote />
         </Show>
-        <button class="cx-pill" onClick={openJump} title="Ir para qualquer agente ou projeto">
-          <Search size={12} />
-          Ir para
-          <span class="cx-kbd">⌘K</span>
-        </button>
-        <button
-          class="cx-icon-btn"
-          onClick={cycleTheme}
-          title={themeSpec().mode === "dark" ? "Tema claro (⌘⇧T)" : "Tema escuro (⌘⇧T)"}
+        <Show
+          when={!compact()}
+          fallback={
+            <button class="cx-icon-btn" onClick={openJump} aria-label="Ir para qualquer agente ou projeto">
+              <Search size={15} />
+            </button>
+          }
         >
-          {themeSpec().mode === "dark" ? <Sun size={14} /> : <Moon size={14} />}
-        </button>
+          <button class="cx-pill" onClick={openJump} title="Ir para qualquer agente ou projeto">
+            <Search size={12} />
+            Ir para
+            <span class="cx-kbd">⌘K</span>
+          </button>
+          <button
+            class="cx-icon-btn"
+            onClick={cycleTheme}
+            title={themeSpec().mode === "dark" ? "Tema claro (⌘⇧T)" : "Tema escuro (⌘⇧T)"}
+          >
+            {themeSpec().mode === "dark" ? <Sun size={14} /> : <Moon size={14} />}
+          </button>
+        </Show>
         <button class="cx-icon-btn" onClick={() => setSettingsOpen(true)} title="Configurações (⌘,)">
           <Settings2 size={14} />
         </button>
         <button
           class="cx-btn-primary ml-1 !h-[28px]"
+          classList={{ "!w-[28px] !px-0": compact() }}
+          aria-label="Novo agente"
           onClick={() => openCreator({ mode: "agent", projectId: routeProjectId() ?? undefined })}
         >
-          Novo agente
-          <span class="font-sans text-[11px] opacity-70">⌘N</span>
+          <Show when={!compact()} fallback={<Plus size={15} />}>
+            Novo agente
+            <span class="font-sans text-[11px] opacity-70">⌘N</span>
+          </Show>
         </button>
       </div>
     </header>
@@ -227,7 +240,7 @@ function Remote() {
  *  terminals sit in a second row: siblings are always one click away. */
 export function ChildStrip() {
   const project = () =>
-    (navMode() === "tabs" || !sidebarOpen()) && routeProjectId() ? focusedProject() : null;
+    (navMode() === "tabs" || !sidebarOpen() || compact()) && routeProjectId() ? focusedProject() : null;
   return (
     <Show when={project() && childrenOf(project()!).length > 0}>
       <div class="flex h-[34px] shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line bg-panel px-3 [scrollbar-width:none]">

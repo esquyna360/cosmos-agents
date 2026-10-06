@@ -498,7 +498,7 @@ export default function CanvasView() {
         </Show>
       </div>
 
-      <div data-ui class="cx-glass absolute bottom-4 left-4 flex items-center gap-0.5 rounded-full border border-line p-1">
+      <div data-ui class="cx-glass cx-canvas-zoom absolute bottom-4 left-4 flex items-center gap-0.5 rounded-full border border-line p-1">
         <button class="cx-icon-btn" title="Afastar" onClick={() => zoomBy(1 / 1.25)}>
           <Minus size={13} />
         </button>
@@ -726,7 +726,7 @@ function Minimap(props: {
     <Show when={props.ids.length > 1 && props.size.w > 0}>
       <div
         data-ui
-        class="cx-glass absolute bottom-4 right-4 cursor-pointer overflow-hidden rounded-[12px] border border-line"
+        class="cx-glass cx-canvas-map absolute bottom-4 right-4 cursor-pointer overflow-hidden rounded-[12px] border border-line"
         style={{ width: `${MAP_W}px`, height: `${MAP_H}px` }}
         onPointerDown={(e) => {
           e.currentTarget.setPointerCapture(e.pointerId);

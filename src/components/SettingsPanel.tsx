@@ -71,14 +71,14 @@ export default function SettingsPanel() {
 
   return (
     <div
-      class="fixed inset-0 z-50 flex items-start justify-center bg-sunken p-10 backdrop-blur-[2px]"
+      class="fixed inset-0 z-50 flex items-start justify-center bg-sunken p-10 backdrop-blur-[2px] max-[760px]:p-3"
       onClick={(e) => {
         if (e.target === e.currentTarget) setSettingsOpen(false);
       }}
     >
-      <div class="cx-glass cx-sheet flex max-h-full w-[34rem] flex-col overflow-hidden rounded-cx-lg border border-line">
+      <div class="cx-glass cx-sheet flex max-h-full w-[34rem] max-w-full flex-col overflow-hidden rounded-cx-lg border border-line">
         <header class="flex shrink-0 items-center gap-2 border-b border-line px-4 py-3">
-          <h2 class="text-[13.5px] font-semibold">Configurações</h2>
+          <h2 class="text-[13.5px] font-semibold max-[760px]:hidden">Configurações</h2>
           <div class="ml-auto flex items-center gap-0.5 rounded-cx border border-line bg-fill-1 p-0.5">
             <For each={TABS}>
               {(t) => (

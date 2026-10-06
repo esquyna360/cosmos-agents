@@ -68,6 +68,7 @@ import {
   settingsOpen,
   toggleSettings,
   toggleSidebar,
+  compact,
 } from "./stores/layout";
 import { cycleTheme, initTheme } from "./stores/theme";
 import { startUpdateWatch } from "./stores/updates";
@@ -260,12 +261,12 @@ export default function App() {
   const roots = () => focusedProject()?.folders ?? [];
 
   return (
-    <div class="flex h-screen w-screen flex-col overflow-hidden bg-void text-ink">
+    <div class="cx-app flex h-screen w-screen flex-col overflow-hidden bg-void text-ink">
       <TopStrip />
       <ChildStrip />
 
       <div class="flex min-h-0 flex-1">
-      <Show when={navMode() === "sidebar"}>
+      <Show when={navMode() === "sidebar" && !compact()}>
         <SideNav />
       </Show>
       <main class="relative flex min-h-0 min-w-0 flex-1 flex-col bg-void">

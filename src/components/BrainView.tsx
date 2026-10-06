@@ -6,7 +6,9 @@ import { EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
-import { ArrowUpRight, Check, FileText, Maximize2, Pencil, Plus, Search, Waypoints, X } from "lucide-solid";
+import { ArrowUpRight, Check, FileText, Link2, Maximize2, Pencil, Plus, Search, Waypoints, X } from "lucide-solid";
+
+import { compact } from "../stores/layout";
 
 import BrainGraph from "./BrainGraph";
 import { cosmosEditorTheme } from "../lib/cmTheme";
@@ -207,7 +209,15 @@ export default function BrainView() {
       .map((n) => ({ id: n.id, title: n.title, source: n.source, group: n.group, detail: n.description, when: n.modified }));
   });
 
+  // On a phone the three columns become three screens.
+  const [phone, setPhone] = createSignal<"list" | "main" | "ctx">("list");
+
   function pick(id: string): void {
+    if (compact()) {
+      openNote(id, "note");
+      setPhone("main");
+      return;
+    }
     openNote(id, pane() === "graph" ? null : "note");
   }
 
@@ -267,7 +277,7 @@ export default function BrainView() {
   const visibleTags = createMemo(() => index().tags.slice(0, moreTags() ? 60 : 12));
 
   return (
-    <div class="cx-brain flex min-h-0 flex-1">
+    <div class="cx-brain flex min-h-0 flex-1" data-m={compact() ? phone() : undefined}>
       <aside class="cx-brain-side flex w-[300px] shrink-0 flex-col border-r border-line bg-panel">
         <div class="flex items-center gap-2 px-3 pb-2 pt-3">
           <label class="cx-brain-search flex h-[32px] min-w-0 flex-1 items-center gap-2 rounded-[9px] px-2.5">
@@ -493,6 +503,26 @@ export default function BrainView() {
 
       <Show when={creating() !== null}>
         <NewNote initial={creating() ?? ""} onClose={() => setCreating(null)} onCreate={create} />
+      </Show>
+      <Show when={compact()}>
+        <nav class="cx-brain-phone">
+          <button data-on={phone() === "list"} onClick={() => setPhone("list")}>
+            <Search size={14} /> Notas
+          </button>
+          <button
+            data-on={phone() === "main"}
+            onClick={() => {
+              setPhone("main");
+              // The graph was laid out while it had no room.
+              requestAnimationFrame(() => setFitTick(fitTick() + 1));
+            }}
+          >
+            <Waypoints size={14} /> {pane() === "graph" ? "Grafo" : "Nota"}
+          </button>
+          <button data-on={phone() === "ctx"} onClick={() => setPhone("ctx")}>
+            <Link2 size={14} /> Ligações
+          </button>
+        </nav>
       </Show>
     </div>
   );

@@ -52,8 +52,14 @@ const [settingsOpen, setSettingsOpenRaw] = createSignal<boolean>(false);
 // hide the terminal so the composer can claim the full pane height.
 const [composerExpanded, setComposerExpandedRaw] = createSignal<boolean>(false);
 
+// A phone, or a window narrow enough to be one: single column everywhere.
+const narrow = window.matchMedia("(max-width: 760px)");
+const [compact, setCompact] = createSignal<boolean>(narrow.matches);
+narrow.addEventListener("change", (e) => setCompact(e.matches));
+
 export {
   view,
+  compact,
   settingsOpen,
   composerVisible,
   workflowOpen,

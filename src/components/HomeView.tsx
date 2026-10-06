@@ -64,7 +64,7 @@ export default function HomeView() {
   return (
     <div class="flex min-h-0 flex-1 flex-col">
       <QuickAgent />
-      <div class="shrink-0 border-b border-line px-6 py-2">
+      <div class="cx-home-filters shrink-0 border-b border-line px-6 py-2">
       <div class="mx-auto flex max-w-[1080px] flex-wrap items-center gap-1">
         <For each={[["all", "Tudo"], ["agent", "Agentes"], ["shell", "Terminais"]] as [Kind, string][]}>
           {([id, label]) => (
@@ -97,10 +97,10 @@ export default function HomeView() {
       </div>
       </div>
 
-      <div class="min-h-0 flex-1 overflow-auto px-6 pb-10">
-        <div class="mx-auto min-w-[900px] max-w-[1080px]">
+      <div class="cx-home-list min-h-0 flex-1 overflow-auto px-6 pb-10">
+        <div class="cx-home-table mx-auto min-w-[900px] max-w-[1080px]">
           <div
-            class={`sticky top-0 z-10 grid ${COLS} items-center gap-3 border-b border-line bg-void px-2 py-2 text-[11.5px] text-faint`}
+            class={`cx-home-row sticky top-0 z-10 grid ${COLS} items-center gap-3 border-b border-line bg-void px-2 py-2 text-[11.5px] text-faint`}
           >
             <span>Nome</span>
             <span>Estado</span>
@@ -163,7 +163,7 @@ function Row(props: { project: ProjectUI; runner: RunnerUI }) {
     <div
       role="button"
       tabIndex={0}
-      class={`group grid ${COLS} h-[32px] cursor-default items-center gap-3 rounded-lg px-2 text-[12.5px] transition hover:bg-fill-2`}
+      class={`cx-home-row group grid ${COLS} h-[32px] cursor-default items-center gap-3 rounded-lg px-2 text-[12.5px] transition hover:bg-fill-2`}
       classList={{ "bg-busy-soft": needsYou(r()) }}
       onClick={() => focusRunner(props.project.id, r().id)}
       onKeyDown={(e) => e.key === "Enter" && focusRunner(props.project.id, r().id)}
@@ -292,7 +292,7 @@ function QuickAgent() {
   }
 
   return (
-    <div class="shrink-0 px-6 pb-4 pt-6">
+    <div class="cx-home-ask shrink-0 px-6 pb-4 pt-6">
       <div class="mx-auto flex max-w-[1080px] flex-col gap-2.5 rounded-[20px] border border-line-strong bg-raised p-3.5 shadow-cx transition focus-within:border-accent">
         <textarea
           rows={2}

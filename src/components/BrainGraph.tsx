@@ -288,6 +288,9 @@ export default function BrainGraph(props: Props) {
       view.x = width / 2;
       view.y = height / 2;
       view.k = 0.5;
+      // Shown late (a phone opens on the list): the layout may have settled
+      // already, so frame it now.
+      goal = bounds() ?? goal;
     }
     dirty = true;
   }

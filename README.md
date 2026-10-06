@@ -126,9 +126,28 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
 - **Self-update** — checks GitHub Releases at launch and every 6 h on macOS
   and Windows. Auto-install only fires when no runner is live, because
   relaunching kills every PTY; otherwise it waits behind a banner.
-- **Settings sheet** (`⌘,`) — theme picker, keymap reference, and the remote
-  switches: web UI, Cloudflare tunnel (toggles live, no restart), Telegram
-  notifications.
+- **Web** — the same app in any browser, phone included: hub, canvas, brain,
+  chats and live terminals. It is the desktop frontend itself, served by the
+  app on your network (port 7777) and, optionally, through a Cloudflare
+  tunnel; its calls run through the very handlers the window uses. The
+  address alone opens nothing. A browser gets in by typing a six-digit code
+  shown at the desk (Settings › remoto › Parear dispositivo): five minutes,
+  one use, five misses burn it, and misses lock the address out. The session
+  is an httpOnly, SameSite=Strict cookie that slides for 30 days; only its
+  hash is stored (`~/.cosmos/web-devices.json`). Every paired browser is
+  listed with a switch that ends its session and closes its sockets at once.
+  On a phone the layout folds to one column and the terminal gains the keys
+  a touch keyboard lacks (esc, tab, arrows, ^C).
+
+  ```
+  cosmos web                 # where it is being served
+  cosmos web pair            # a fresh pairing code
+  cosmos web devices         # who has access
+  cosmos web revoke <id>     # end one session
+  ```
+- **Settings sheet** (`⌘,`) — theme picker, keymap reference, and remote
+  access: pairing, paired browsers, local network, Cloudflare tunnel (toggles
+  live, no restart), Telegram notifications.
 - **Drag to reorder** runners; double-click any
   name to rename in place. Order is persisted in a `position` column.
 - **Deleting** — a trash icon on the project row: one click when nothing is
