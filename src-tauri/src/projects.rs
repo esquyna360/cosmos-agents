@@ -952,8 +952,17 @@ fn session_uuid() -> String {
     crate::uuid_v4_for_ipc()
 }
 
-/// Pre-approve the "Do you trust the files in this folder?" dialog for Claude
-/// Code by writing `hasTrustDialogAccepted=true` into `~/.claude.json` for each
+/// Per-folder flags in `~/.claude.json` behind Claude Code's startup dialogs:
+/// folder trust, and the "allow external CLAUDE.md file imports" prompt that
+/// every project CLAUDE.md with an `@/abs/path` import would otherwise raise.
+const CLAUDE_STARTUP_APPROVALS: &[&str] = &[
+    "hasTrustDialogAccepted",
+    "hasClaudeMdExternalIncludesApproved",
+    "hasClaudeMdExternalIncludesWarningShown",
+];
+
+/// Pre-approve Claude Code's startup dialogs (see `CLAUDE_STARTUP_APPROVALS`)
+/// by writing each flag as `true` into `~/.claude.json` for each
 /// path. Best-effort: if `~/.claude.json` is missing or unparseable we just
 /// return — the user can still accept manually. The point is to unblock remote
 /// flows (e.g. Telegram) where the modal sits on a freshly-spawned agent that
@@ -981,16 +990,12 @@ pub fn mark_paths_trusted_in_claude_json(home: &Path, paths: &[String]) -> Resul
         let Some(obj) = entry.as_object_mut() else {
             continue;
         };
-        let already = obj
-            .get("hasTrustDialogAccepted")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        if !already {
-            obj.insert(
-                "hasTrustDialogAccepted".into(),
-                serde_json::Value::Bool(true),
-            );
-            changed = true;
+        for flag in CLAUDE_STARTUP_APPROVALS {
+            let already = obj.get(*flag).and_then(|v| v.as_bool()).unwrap_or(false);
+            if !already {
+                obj.insert((*flag).into(), serde_json::Value::Bool(true));
+                changed = true;
+            }
         }
     }
     if changed {
