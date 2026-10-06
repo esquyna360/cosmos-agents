@@ -13,9 +13,26 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
   `~/.cosmos/projects/<slug>/`. Sticky slug = filesystem handle that doesn't
   move on rename. Names are unique (case-insensitive).
 - **Home and Hub** — home is a compact board of every agent and terminal
-  grouped by project (filters, context, cost, last activity) under a
-  composer: type the task, pick the project, get an agent. *Hub* is the
-  `geral` agent, the one that drives the `cosmos` CLI for you.
+  grouped by project (filters, model, context, cost, last activity) under a
+  composer. By default the composer talks to the *Hub* (the `geral` agent):
+  type the task and it decides alone whether an existing agent takes it, a
+  new one starts in the right project, or it solves it itself — and on which
+  model. A line under the text shows where the task would go and why, as you
+  type. Picking a project pill instead creates an agent there directly.
+- **Routing** — `cosmos route <task>` is the same ranking the composer
+  previews (`router.rs`): projects by folder and name, agents by the history
+  they hold, liveness and recency, plus a model pick (Opus for architecture
+  and decisions, Sonnet for execution, the cheapest available provider for
+  mechanical work). It is deterministic and only suggests; the Hub has the
+  last word. `cosmos runner peek` reads the tail of any agent's conversation,
+  and `runner send` wakes a stopped agent with its context.
+- **Models and providers** — every agent is Claude Code; `--model` picks the
+  model and `--provider` the endpoint. DeepSeek ships built in through its
+  Anthropic-compatible API (`deepseek-flash`, `deepseek-v4-pro`); more go in
+  `~/.cosmos/providers.json` (`id`, `name`, `base_url`, `key_file`,
+  `models[{id,label,tier}]`). Keys stay in `~/.private_keys/` (DeepSeek:
+  `deepseek_api_key`): read at spawn, passed as env, never stored. A provider
+  without its key shows as *sem key* and is skipped by the router.
 - **Projects nav** — a sidebar (`⌘B` collapses it to a rail that opens on hover) or tabs
   in the top strip, listing only projects, projects with agents, or agents and terminals.
   Anything stopped for 3+ days is folded away. `⌘K` jumps anywhere.
@@ -23,8 +40,10 @@ Native Mac app to orchestrate N parallel AI coding agents — Tauri 2 + SolidJS 
   message), a name, and *main* or its *own worktree*
   (`~/.cosmos/worktrees/<slug>/<name>` on branch `cosmos/<name>`). The
   dialog prints the equivalent `cosmos runner add …` command.
-- **CLI** — `cosmos runner add --task --worktree`, `runner send`,
-  `runner stop`, `runner rename`, `runner list`, `cosmos status`.
+- **CLI** — `cosmos route`, `cosmos models`,
+  `cosmos runner add --task --worktree --model --provider`, `runner send`,
+  `runner peek`, `runner set --model`, `runner stop`, `runner rename`,
+  `runner list`, `cosmos status`.
   - **Chat is switched off for now** (`CHAT_ENABLED` in `projects.rs` and
     `lib/projects.ts`): the headless session can't drive the Chrome
     integration, so every agent runs as a terminal. What follows describes

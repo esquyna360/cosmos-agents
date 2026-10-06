@@ -371,6 +371,7 @@ pub fn suggest(app: &AppHandle, task: &str) -> Result<Suggestion> {
             is_master: is_master_project(p),
         })
         .collect();
+    let known = providers::list(&home);
     let agents: Vec<AgentView> = projects::runners_list(&store)?
         .iter()
         .filter(|r| r.kind == "agent")
@@ -391,10 +392,16 @@ pub fn suggest(app: &AppHandle, task: &str) -> Result<Suggestion> {
                 status,
                 last_active: r.last_active,
                 is_master: is_master_project(p) && r.name.eq_ignore_ascii_case(MASTER_NAME),
+                tier: known
+                    .iter()
+                    .flat_map(|p| p.models.iter())
+                    .find(|m| !r.model.is_empty() && m.id == r.model)
+                    .map(|m| m.tier),
+                model_label: providers::label(&home, &r.provider, &r.model),
             })
         })
         .collect();
-    Ok(router::suggest(task, &views, &agents, &providers::list(&home), now_unix()))
+    Ok(router::suggest(task, &views, &agents, &known, now_unix()))
 }
 
 #[cfg(test)]

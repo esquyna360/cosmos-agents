@@ -28,6 +28,9 @@ pub struct AgentView {
     pub status: String,
     pub last_active: i64,
     pub is_master: bool,
+    /// What its model is good for; `None` while it runs on the CLI default.
+    pub tier: Option<Tier>,
+    pub model_label: String,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -316,6 +319,13 @@ pub fn suggest(
             }
             let mut reasons = preasons.clone();
             reasons.extend(areasons);
+            // Context beats model: only an agent with no history on this
+            // gives way to a fresh one on the right model.
+            let misfit = !history && a.tier.is_some_and(|t| t != model.tier);
+            if misfit {
+                reasons.push(format!("roda em {}, a tarefa pede {}", a.model_label, model.label));
+            }
+            let ascore = if misfit { ascore - 3 } else { ascore };
             candidates.push(Candidate {
                 project: p.slug.clone(),
                 project_name: p.name.clone(),
@@ -425,6 +435,8 @@ mod tests {
             status: status.into(),
             last_active: NOW - 3600,
             is_master: false,
+            tier: None,
+            model_label: String::new(),
         }
     }
 
@@ -450,6 +462,18 @@ mod tests {
         assert_eq!(s.action, "send");
         assert_eq!(s.candidates[0].runner_id, "ranking");
         assert!(s.command.starts_with("cosmos runner send --id ranking"));
+    }
+
+    #[test]
+    fn a_free_agent_on_the_wrong_model_gives_way_to_a_fresh_one() {
+        let (p, mut a) = world();
+        a[2].tier = Some(Tier::Deep);
+        a[2].model_label = "Opus".into();
+        let s = suggest("traduzir as strings do ninar", &p, &a, &providers(true), NOW);
+        assert_eq!(s.action, "spawn");
+        assert!(s.command.contains("--model deepseek-flash"), "{}", s.command);
+        let s = suggest("ajustar o paywall revenuecat do ninar", &p, &a, &providers(true), NOW);
+        assert_eq!(s.candidates[0].runner_id, "paywall");
     }
 
     #[test]
