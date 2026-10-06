@@ -308,6 +308,25 @@ fn glance(app: &AppHandle, project: &ProjectRecord, rec: &RunnerRecord) -> (Stri
     (title, last)
 }
 
+/// Per agent: what it has spent, how full its context is, and the title and
+/// last line of its session. Keyed by runner id; agents with no transcript
+/// yet are left out.
+pub fn vitals(app: &AppHandle) -> Result<std::collections::HashMap<String, Value>> {
+    let store = app.state::<Store>();
+    let all = projects::list(&store)?;
+    let mut out = std::collections::HashMap::new();
+    for rec in projects::runners_list(&store)?.iter().filter(|r| r.kind == "agent") {
+        let Some(project) = all.iter().find(|p| p.id == rec.project_id) else { continue };
+        let Some(path) = transcript(app, project, rec) else { continue };
+        let (title, last) = glance(app, project, rec);
+        let mut v = serde_json::to_value(crate::usage::read(&path))?;
+        v["title"] = json!(title);
+        v["last"] = json!(last);
+        out.insert(rec.id.clone(), v);
+    }
+    Ok(out)
+}
+
 /* ------------------------------- overview ------------------------------- */
 
 fn is_master_project(p: &ProjectRecord) -> bool {

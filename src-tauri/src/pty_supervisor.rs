@@ -11,6 +11,7 @@ use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter};
 
+use crate::screen::{Screen, Snapshot};
 use crate::status_fsm::{Status, StatusFsm};
 
 const BUFFER_CAP: usize = 1_000_000;
@@ -58,6 +59,7 @@ struct RunnerInner {
     project_id: String,
     kind: RunnerKind,
     buffer: Mutex<Vec<u8>>,
+    screen: Mutex<Screen>,
     channel: Mutex<Option<Channel<InvokeResponseBody>>>,
     writer: Mutex<Box<dyn Write + Send>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
@@ -179,6 +181,7 @@ impl PtySupervisor {
             project_id,
             kind,
             buffer: Mutex::new(Vec::with_capacity(64 * 1024)),
+            screen: Mutex::new(Screen::new(cols, rows)),
             channel: Mutex::new(None),
             writer: Mutex::new(writer),
             master: Mutex::new(pair.master),
@@ -214,6 +217,7 @@ impl PtySupervisor {
                                     b.drain(..drop_n);
                                 }
                             }
+                            inner_r.screen.lock().unwrap().feed(chunk);
                             let ch = inner_r.channel.lock().unwrap().clone();
                             if let Some(ch) = ch {
                                 let _ = ch.send(InvokeResponseBody::Raw(chunk.to_vec()));
@@ -338,7 +342,27 @@ impl PtySupervisor {
             pixel_width: 0,
             pixel_height: 0,
         })?;
+        inner.screen.lock().unwrap().resize(cols, rows);
         Ok(())
+    }
+
+    /// The bottom `rows` of each live runner's screen. Runners whose screen
+    /// has not changed since the version in `seen` are left out.
+    pub fn screens(&self, ids: &[String], rows: usize, seen: &HashMap<String, u64>) -> Vec<Snapshot> {
+        let runners = self.runners.lock().unwrap();
+        let picked: Vec<Arc<RunnerInner>> = ids.iter().filter_map(|id| runners.get(id).cloned()).collect();
+        drop(runners);
+        picked
+            .iter()
+            .filter_map(|inner| {
+                let screen = inner.screen.lock().unwrap();
+                if seen.get(&inner.id) == Some(&screen.ver()) {
+                    return None;
+                }
+                let (cols, lines) = screen.tail(rows);
+                Some(Snapshot { id: inner.id.clone(), ver: screen.ver(), cols, lines })
+            })
+            .collect()
     }
 
     pub fn kill(&self, id: &str) -> Result<()> {

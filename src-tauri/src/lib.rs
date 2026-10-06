@@ -12,9 +12,11 @@ mod providers;
 mod pty_supervisor;
 pub mod remote;
 mod router;
+mod screen;
 mod status_fsm;
 mod store;
 mod tunnel;
+mod usage;
 mod worktree;
 mod web;
 
@@ -209,6 +211,21 @@ fn pty_resize(
     rows: u16,
 ) -> Result<(), String> {
     sup.resize(&id, cols, rows).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn pty_screens(
+    sup: State<'_, PtySupervisor>,
+    ids: Vec<String>,
+    rows: usize,
+    seen: std::collections::HashMap<String, u64>,
+) -> Vec<screen::Snapshot> {
+    sup.screens(&ids, rows.clamp(1, 60), &seen)
+}
+
+#[tauri::command]
+fn runners_vitals(app: AppHandle) -> Result<std::collections::HashMap<String, serde_json::Value>, String> {
+    ops::vitals(&app).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1037,6 +1054,8 @@ pub fn run() {
             pty_detach,
             pty_write,
             pty_resize,
+            pty_screens,
+            runners_vitals,
             pty_kill,
             pty_live_ids,
             debug_log,
