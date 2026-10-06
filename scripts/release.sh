@@ -6,7 +6,8 @@
 #   3. GitHub Actions builds macOS (arm64) + Windows, signs the updater
 #      tarball, and uploads everything to a GH release named after the tag
 #   4. once the workflow finishes, download the macOS .app from the release
-#      and install it to /Applications
+#      and hand it to scripts/swap-app.sh, which installs it to /Applications
+#      detached from this session and wakes the agents the restart cut off
 #
 # Usage:
 #   scripts/release.sh                # patch bump (0.1.0 -> 0.1.1)
@@ -159,36 +160,33 @@ else
 fi
 
 # --- install macOS build locally --------------------------------------------
+# Quitting the app kills every agent, the one running this script included, so
+# the swap runs detached (scripts/swap-app.sh) and wakes whoever was mid-turn.
 if [[ $DO_INSTALL -eq 1 ]]; then
   log "Downloading macOS bundle from release $TAG"
-  mkdir -p "$HOME/code/.dev-logs"
-  WORK="$(mktemp -d "$HOME/code/.dev-logs/cosmos-release-XXXXXX")"
-  trap 'rm -rf "$WORK"' EXIT
-
+  WORK="$HOME/code/.dev-logs/cosmos-release"
   if [[ $DRY_RUN -eq 1 ]]; then
-    echo "  + gh release download $TAG (mac tarball) -> $WORK"
+    echo "  + gh release download $TAG (mac tarball) -> $WORK/dl"
+    echo "  + scripts/swap-app.sh $WORK/dl/${APP_NAME}.app (detached)"
   else
-    # Tauri action uploads the updater bundle with a versioned name.
-    # Fall back to glob in case naming differs.
-    gh release download "$TAG" --repo "$REPO_SLUG" -D "$WORK" \
+    rm -rf "$WORK/dl" && mkdir -p "$WORK/dl"
+    gh release download "$TAG" --repo "$REPO_SLUG" -D "$WORK/dl" \
       --pattern "*aarch64*app.tar.gz" \
       || die "No macOS aarch64 app.tar.gz found in release $TAG"
-    TARBALL="$(find "$WORK" -name "*aarch64*app.tar.gz" -print -quit)"
+    TARBALL="$(find "$WORK/dl" -name "*aarch64*app.tar.gz" -print -quit)"
     [[ -n "$TARBALL" ]] || die "Downloaded but tarball not found"
+    tar -xzf "$TARBALL" -C "$WORK/dl"
+    APP_SRC="$WORK/dl/${APP_NAME}.app"
+    [[ -d "$APP_SRC" ]] || die "Tarball did not contain ${APP_NAME}.app"
 
-    log "Extracting $(basename "$TARBALL")"
-    tar -xzf "$TARBALL" -C "$WORK"
-    APP_SRC="$(find "$WORK" -maxdepth 2 -name "${APP_NAME}.app" -print -quit)"
-    [[ -n "$APP_SRC" && -d "$APP_SRC" ]] || die "Tarball did not contain ${APP_NAME}.app"
-
-    log "Installing to $APP_BUNDLE"
-    pkill -x "agent-dashboard" 2>/dev/null || true
-    pkill -x "${APP_NAME}" 2>/dev/null || true
-    sleep 1
-    rm -rf "$APP_BUNDLE"
-    cp -R "$APP_SRC" "$APP_BUNDLE"
-    codesign --force --deep --sign - "$APP_BUNDLE" >/dev/null 2>&1 || true
-    log "Installed $APP_NAME $NEW. Launch: open -a $APP_NAME"
+    log "Installing to $APP_BUNDLE (detached; log in $WORK/swap.log)"
+    python3 - "$SCRIPT_DIR/swap-app.sh" "$APP_SRC" "${COSMOS_RUNNER_ID:-}" "$WORK/swap.log" <<'PY'
+import subprocess, sys
+script, app, runner, log = sys.argv[1:5]
+out = open(log, "w")
+subprocess.Popen(["/bin/bash", script, app, runner], stdin=subprocess.DEVNULL,
+                 stdout=out, stderr=out, start_new_session=True)
+PY
   fi
 fi
 

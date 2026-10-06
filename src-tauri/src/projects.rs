@@ -1014,6 +1014,39 @@ fn linked_main_root(dir: &Path, dot_git: &Path) -> Option<PathBuf> {
     common.parent().map(Path::to_path_buf)
 }
 
+/// Claude Code's own lock on `~/.claude.json`: a `.claude.json.lock` entry
+/// held for each read-modify-write. Every live session rewrites that file, so
+/// writing around the lock loses either our flags or their update. Waits a
+/// little, then goes ahead unlocked: a session that died holding it must not
+/// keep an agent from starting.
+struct ClaudeConfigLock(Option<PathBuf>);
+
+impl ClaudeConfigLock {
+    const WAIT: std::time::Duration = std::time::Duration::from_millis(1500);
+
+    fn acquire(cfg: &Path) -> Self {
+        let path = cfg.with_extension("json.lock");
+        let deadline = std::time::Instant::now() + Self::WAIT;
+        loop {
+            if std::fs::create_dir(&path).is_ok() {
+                return Self(Some(path));
+            }
+            if std::time::Instant::now() >= deadline {
+                return Self(None);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+}
+
+impl Drop for ClaudeConfigLock {
+    fn drop(&mut self) {
+        if let Some(path) = &self.0 {
+            let _ = std::fs::remove_dir(path);
+        }
+    }
+}
+
 /// Pre-approve Claude Code's startup dialogs (see `CLAUDE_STARTUP_APPROVALS`)
 /// by writing each flag as `true` into `~/.claude.json` under every key
 /// `claude_config_keys` gives for each path. Runs before every spawn, not
@@ -1028,6 +1061,7 @@ pub fn mark_paths_trusted_in_claude_json(home: &Path, paths: &[String]) -> Resul
     if !cfg.exists() {
         return Ok(());
     }
+    let _lock = ClaudeConfigLock::acquire(&cfg);
     let raw = std::fs::read_to_string(&cfg).context("reading ~/.claude.json")?;
     let mut json: serde_json::Value =
         serde_json::from_str(&raw).context("parsing ~/.claude.json")?;
@@ -1407,6 +1441,33 @@ mod tests {
             let mode = std::fs::metadata(home.join(".claude.json")).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o600);
         }
+    }
+
+    /// Claude Code holds `.claude.json.lock` while it rewrites the file. We
+    /// wait for it, write anyway when it never lets go, and leave no lock of
+    /// our own behind.
+    #[test]
+    fn startup_approval_waits_for_claude_codes_lock() {
+        let home = fresh_home("approve-lock");
+        std::fs::write(home.join(".claude.json"), "{}").unwrap();
+        let lock = home.join(".claude.json.lock");
+        std::fs::create_dir(&lock).unwrap();
+        let held = lock.clone();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            std::fs::remove_dir(held).unwrap();
+        });
+        let started = std::time::Instant::now();
+        mark_paths_trusted_in_claude_json(&home, &["/a".into()]).unwrap();
+        assert!(started.elapsed() >= std::time::Duration::from_millis(180));
+        release.join().unwrap();
+        assert_eq!(claude_flags(&home, "/a"), vec![true, true, true]);
+        assert!(!lock.exists());
+
+        std::fs::create_dir(&lock).unwrap();
+        mark_paths_trusted_in_claude_json(&home, &["/b".into()]).unwrap();
+        assert_eq!(claude_flags(&home, "/b"), vec![true, true, true]);
+        assert!(lock.exists(), "a lock we never took is not ours to remove");
     }
 
     #[test]

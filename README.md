@@ -219,7 +219,10 @@ first install you only need the dmg/exe again for a clean machine.
 
 Cutting a release: `scripts/release.sh minor` bumps the three version files,
 tags, pushes, waits for the Action, and drops the fresh macOS build into
-`/Applications`.
+`/Applications`. The install quits the app, which kills every agent, so it
+runs detached (`scripts/swap-app.sh`): it reopens Cosmos with a clean
+environment, rolls back if the new build does not come up, and wakes the
+agents that were mid-turn. `scripts/swap-app.sh -` only restarts the app.
 
 ## Running locally
 
