@@ -1139,3 +1139,229 @@ button:focus-visible,
     transition: none !important;
   }
 }
+
+/* Brain: the vault. A list to find, a graph to wander, a page to read. */
+.cx-brain {
+  animation: cx-route-in 0.22s ease-out both;
+}
+.cx-brain-search {
+  background: var(--fill-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition:
+    box-shadow 0.14s,
+    background-color 0.14s;
+}
+.cx-brain-search:focus-within {
+  background: var(--fill-2);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.cx-brain-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 23px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  background: var(--fill-1);
+  white-space: nowrap;
+  transition:
+    background-color 0.12s,
+    color 0.12s;
+}
+.cx-brain-chip:hover {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.cx-brain-chip[data-on="true"] {
+  background: var(--fill-3);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.cx-brain-tag {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  font-size: 11.5px;
+  line-height: 20px;
+  color: var(--text-dim);
+  transition: color 0.12s;
+}
+.cx-brain-tag:hover {
+  color: var(--text);
+}
+.cx-brain-tag[data-on="true"] {
+  color: var(--accent);
+}
+.cx-brain-row {
+  display: flex;
+  width: 100%;
+  gap: 9px;
+  padding: 7px 9px;
+  border-radius: 9px;
+  text-align: left;
+  transition: background-color 0.1s;
+}
+.cx-brain-row:hover,
+.cx-brain-row[data-cursor="true"] {
+  background: var(--fill-1);
+}
+.cx-brain-row[data-on="true"] {
+  background: var(--fill-2);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.cx-brain-seg {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--fill-1);
+}
+.cx-brain-seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  transition:
+    background-color 0.14s,
+    color 0.14s;
+}
+.cx-brain-seg button:hover {
+  color: var(--text);
+}
+.cx-brain-seg button[data-on="true"] {
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: var(--shadow-1);
+}
+.cx-brain-graph {
+  background:
+    radial-gradient(ellipse at 50% 42%, var(--fill-1), transparent 62%),
+    var(--void);
+}
+.cx-brain-legend {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  box-shadow: inset 0 0 0 1px var(--line);
+  backdrop-filter: blur(10px);
+}
+.cx-brain-legend button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 8px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  transition:
+    opacity 0.14s,
+    background-color 0.12s;
+}
+.cx-brain-legend button:hover {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.cx-brain-legend button[data-off="true"] {
+  opacity: 0.38;
+}
+.cx-brain-hint {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  font-size: 11px;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+.cx-brain-title {
+  font-family: var(--font-heading);
+  font-size: 24px;
+  line-height: 1.2;
+  color: var(--text);
+}
+.cx-brain-note {
+  animation: cx-pane-in 0.2s ease-out both;
+}
+.cx-brain-prose a {
+  cursor: pointer;
+}
+.cx-brain-prose .cx-wiki {
+  color: var(--accent);
+  text-decoration: none;
+  padding: 0 3px;
+  margin: 0 -1px;
+  border-radius: 5px;
+  background: var(--accent-soft);
+  transition: background-color 0.12s;
+}
+.cx-brain-prose .cx-wiki:hover {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.cx-brain-prose .cx-wiki[data-missing="true"] {
+  color: var(--text-faint);
+  background: transparent;
+  box-shadow: inset 0 -1px 0 var(--line-strong);
+  border-radius: 0;
+}
+.cx-brain-h {
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.cx-brain-mention {
+  display: block;
+  width: calc(100% + 12px);
+  margin: 0 -6px;
+  padding: 5px 6px;
+  border-radius: 8px;
+  text-align: left;
+  transition: background-color 0.1s;
+}
+.cx-brain-mention:hover {
+  background: var(--fill-1);
+}
+.cx-brain-cli {
+  padding: 9px 10px;
+  border-radius: 9px;
+  background: var(--well);
+  color: var(--term-fg);
+  font-family: "JetBrains Mono Variable", "Fira Code", ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+.cx-brain-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 18vh;
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(3px);
+  animation: cx-pane-in 0.14s ease-out both;
+}
+.cx-brain-sheet {
+  width: min(520px, calc(100vw - 48px));
+  padding: 18px 20px 16px;
+  border-radius: 16px;
+  background: var(--float);
+  box-shadow:
+    var(--shadow-2),
+    inset 0 0 0 1px var(--line-strong);
+  animation: cx-sheet-in 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.1) both;
+}

@@ -67,6 +67,14 @@ export default function TopStrip() {
         >
           Canvas
         </button>
+        <button
+          class="cx-pill"
+          data-on={route().kind === "brain"}
+          title="Tudo que os agentes sabem, ligado (⌘⇧B)"
+          onClick={() => go({ kind: "brain" })}
+        >
+          Cérebro
+        </button>
         <button class="cx-pill" data-on={route().kind === "hub"} onClick={() => go({ kind: "hub" })}>
           Hub
         </button>

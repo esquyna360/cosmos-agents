@@ -73,6 +73,9 @@ pub struct Opened {
     pub content: String,
     pub backlinks: Vec<Mention>,
     pub outgoing: Vec<Mention>,
+    /// Each link as written in the note (`[[target]]` or a relative href),
+    /// mapped to the note it points at.
+    pub resolved: HashMap<String, String>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -476,6 +479,8 @@ struct Built {
     texts: Vec<(Arc<str>, Arc<str>)>,
     /// `(from, to, line)` by position in `notes`.
     mentions: Vec<(usize, usize, String)>,
+    /// Per note: link as written → position in `notes`.
+    targets: Vec<HashMap<String, usize>>,
 }
 
 /// Resolves a `[[target]]` the way a person means it: a note called that,
@@ -585,12 +590,15 @@ fn build_now(home: &Path) -> Built {
     let keys = keys_of(&parsed);
     let by_path: HashMap<PathBuf, usize> = parsed.iter().enumerate().map(|(i, p)| (PathBuf::from(&p.note.path), i)).collect();
     let mut mentions: Vec<(usize, usize, String)> = Vec::new();
+    let mut targets: Vec<HashMap<String, usize>> = Vec::with_capacity(parsed.len());
     for i in 0..parsed.len() {
+        let mut written: HashMap<String, usize> = HashMap::new();
         let mut links: Vec<usize> = Vec::new();
         let mut dangling: Vec<String> = Vec::new();
         for (target, line) in &parsed[i].wiki {
             match resolve(target, Some(i), &parsed, &keys) {
                 Some(to) => {
+                    written.insert(target.clone(), to);
                     if !links.contains(&to) {
                         links.push(to);
                         mentions.push((i, to, line.clone()));
@@ -603,6 +611,7 @@ fn build_now(home: &Path) -> Built {
         for (href, line) in &parsed[i].relative {
             let joined = normalize_path(&parsed[i].dir.join(href));
             if let Some(&to) = by_path.get(&joined) {
+                written.insert(href.clone(), to);
                 if to != i && !links.contains(&to) {
                     links.push(to);
                     mentions.push((i, to, line.clone()));
@@ -611,12 +620,13 @@ fn build_now(home: &Path) -> Built {
         }
         parsed[i].note.links = links.iter().map(|to| parsed[*to].note.id.clone()).collect();
         parsed[i].note.dangling = dangling;
+        targets.push(written);
     }
     for (_, to, _) in &mentions {
         parsed[*to].note.backlinks += 1;
     }
     let texts = parsed.iter().map(|p| (p.raw.clone(), p.folded.clone())).collect();
-    Built { notes: parsed.into_iter().map(|p| p.note).collect(), texts, mentions }
+    Built { notes: parsed.into_iter().map(|p| p.note).collect(), texts, mentions, targets }
 }
 
 /// Resolves `..` and `.` without touching the disk.
@@ -711,7 +721,8 @@ pub fn open(home: &Path, key: &str) -> Result<Opened> {
         .filter(|(from, _, _)| *from == i)
         .map(|(_, to, line)| mention(&built.notes[*to], line))
         .collect();
-    Ok(Opened { note, content, backlinks, outgoing })
+    let resolved = built.targets[i].iter().map(|(written, to)| (written.clone(), built.notes[*to].id.clone())).collect();
+    Ok(Opened { note, content, backlinks, outgoing, resolved })
 }
 
 /* -------------------------------- writing ------------------------------- */
@@ -838,7 +849,7 @@ fn snippet(content: &str, terms: &[String]) -> String {
     let line = body
         .lines()
         .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with("<!--"))
+        .filter(|l| !l.is_empty() && !l.starts_with("<!--") && !l.starts_with('#'))
         .find(|l| {
             let f = fold(l);
             terms.iter().any(|t| f.contains(t.as_str()))
@@ -968,6 +979,9 @@ mod tests {
         assert_eq!(from, ["Memória · tmp-ninar", "Padrão de anúncios", "ninar-paywall"]);
         assert!(opened.backlinks.iter().any(|m| m.context.contains("Usa RevenueCat")));
         assert!(open(&home, "nada-disso").is_err());
+        let index_note = open(&home, "MEMORY").unwrap();
+        assert_eq!(index_note.resolved.get("paywall.md"), Some(&open(&home, "ninar-paywall").unwrap().note.id));
+        assert_eq!(open(&home, "ninar-paywall").unwrap().resolved.get("loja"), Some(&opened.note.id));
     }
 
     #[test]

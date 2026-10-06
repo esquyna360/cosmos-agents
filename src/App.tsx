@@ -18,6 +18,7 @@ import TopStrip, { ChildStrip } from "./components/TopStrip";
 import HubView from "./components/HubView";
 import HomeView from "./components/HomeView";
 import CanvasView from "./components/CanvasView";
+import BrainView from "./components/BrainView";
 import SideNav from "./components/SideNav";
 import ProjectView from "./components/ProjectView";
 import NewAgentModal from "./components/NewAgentModal";
@@ -149,6 +150,11 @@ export default function App() {
         toggleSettings();
         return;
       }
+      if (key === "b" && e.shiftKey) {
+        e.preventDefault();
+        go({ kind: "brain" });
+        return;
+      }
       if (key === "b") {
         e.preventDefault();
         if (navMode() === "tabs") setNavMode("sidebar");
@@ -181,6 +187,8 @@ export default function App() {
         return;
       }
       if (key === "n") {
+        // In the brain ⌘N is a new note; BrainView handles it.
+        if (route().kind === "brain" && !e.shiftKey) return;
         e.preventDefault();
         const id = routeProjectId();
         if (!e.shiftKey) openCreator({ mode: "agent", projectId: id ?? undefined });
@@ -265,6 +273,9 @@ export default function App() {
           </Show>
           <Show when={route().kind === "canvas"}>
             <CanvasView />
+          </Show>
+          <Show when={route().kind === "brain"}>
+            <BrainView />
           </Show>
           <Show when={route().kind === "hub"}>
             <HubView />

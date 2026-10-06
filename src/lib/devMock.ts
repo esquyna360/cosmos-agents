@@ -270,6 +270,155 @@ function SAMPLE(path: string): string {
   ].join("\n");
 }
 
+interface MockNote {
+  id: string;
+  path: string;
+  name: string;
+  title: string;
+  source: string;
+  group: string;
+  description: string;
+  tags: string[];
+  modified: number;
+  words: number;
+  links: string[];
+  dangling: string[];
+  backlinks: number;
+  content: string;
+}
+
+// A vault shaped like the real one: a memory index per project, a few
+// guidelines everybody cites, and dev logs that mostly stand alone.
+const VAULT: MockNote[] = (() => {
+  const notes: MockNote[] = [];
+  const add = (source: string, group: string, name: string, title: string, description: string, tags: string[], body: string) => {
+    const dir =
+      source === "memory"
+        ? `~/.claude/projects/-Users-bruno-code-${group}/memory`
+        : source === "guideline"
+          ? `~/code/guidelines${group ? `/${group}` : ""}`
+          : source === "devlog"
+            ? `~/code/.dev-logs/${group}`
+            : source === "claude"
+              ? `~/code/${group}`
+              : "~/.cosmos/brain";
+    const file = source === "claude" ? "CLAUDE.md" : `${name}.md`;
+    const front = source === "memory" || source === "note" ? `---\nname: ${name}\ndescription: "${description}"\n---\n\n` : "";
+    notes.push({
+      id: `${dir}/${file}`,
+      path: `/Users/bruno${dir.slice(1)}/${file}`,
+      name,
+      title,
+      source,
+      group,
+      description,
+      tags,
+      modified: now - ((notes.length * 7919) % (86_400 * 40)) - 300,
+      words: 0,
+      links: [],
+      dangling: [],
+      backlinks: 0,
+      content: `${front}${source === "memory" ? "" : `# ${title}\n\n`}${body}\n`,
+    });
+  };
+  add("guideline", "", "PADRAO-DE-QUALIDADE", "Padrão de qualidade", "", ["qualidade"], "Tudo que sai tem nível AAA.\n\n- Loja que vende: ver [[store-screenshots]].\n- Produto completo: feedback, meta, retenção.\n- Envio pras lojas em [[REFERENCIA]].");
+  add("guideline", "", "REFERENCIA", "Referência de build e lojas", "", ["build"], "## Android\n\nAssinatura com o keystore do KeyVerse. Ver [[web-portal-upload]] para os portais.\n\n```sh\nfastlane android release\n```\n\n## iOS\n\nSobe pelo `xcrun altool`. Padrão em [[PADRAO-DE-QUALIDADE]].");
+  add("guideline", "ads", "store-screenshots", "Screenshots de loja", "", ["loja", "aso"], "Promessa em cima, momento de pico embaixo. Nunca print cru.\n\nVale para todo app: [[PADRAO-DE-QUALIDADE]].");
+  add("guideline", "", "AGENTES", "Agentes e escopo", "", ["agentes"], "Cada agente roda na pasta do seu escopo. O Hub decide com `cosmos route`.");
+  const projects = ["ninar", "iquit", "splat-up", "cat-arcade", "one-cue", "metamorfosis", "tangle", "frog-dive"];
+  const topics: [string, string, string[]][] = [
+    ["paywall", "Como o paywall cobra e quando aparece", ["project", "monetizacao"]],
+    ["web-portal-upload", "Upload de build no CrazyGames e Poki, passo a passo", ["reference", "upload"]],
+    ["release-checklist", "O que conferir antes de mandar pra loja", ["feedback", "build"]],
+    ["retencao", "Ganchos de retenção que funcionaram", ["project", "retencao"]],
+    ["bugs-conhecidos", "Bugs que voltam e como resolver", ["feedback"]],
+    ["aso-keywords", "Palavras-chave e posição na loja", ["reference", "aso"]],
+  ];
+  projects.forEach((project, pi) => {
+    const mine = topics.filter((_, ti) => (pi + ti) % 4 !== 3);
+    add("claude", `games/${project}`, "CLAUDE", `CLAUDE.md · ${project}`, "", [], `Projeto ${project}. Siga [[PADRAO-DE-QUALIDADE]] e [[REFERENCIA]].`);
+    add(
+      "memory",
+      `games-${project}`,
+      "MEMORY",
+      `Memória · ${project}`,
+      "",
+      [],
+      mine.map(([name, description]) => `- [${name}](${name}.md) — ${description}`).join("\n"),
+    );
+    mine.forEach(([name, description, tags], ti) => {
+      const other = mine[(ti + 1) % mine.length][0];
+      const extra = ti % 2 === 0 ? " Segue o [[PADRAO-DE-QUALIDADE]]." : ti % 3 === 0 ? " Detalhes em [[REFERENCIA]] e [[store-screenshots]]." : " Falta escrever [[plano-de-lancamento]].";
+      add("memory", `games-${project}`, name, name, description, tags, `${description} no ${project}.\n\nRelacionado: [[${other}]].${extra}\n\n**Why:** aprendido em produção.\n**How to apply:** conferir antes de cada versão. #${tags[tags.length - 1]}`);
+    });
+    for (let d = 0; d < 5; d++) {
+      const linked = d === 0;
+      add("devlog", `${project}/v1.${d}`, `relatorio-${d}`, `${project}: relatório v1.${d}`, "", [], linked ? `Build enviado seguindo [[web-portal-upload]] e [[release-checklist]].` : `Capturas e medições da versão 1.${d}. Sem pendências.`);
+    }
+  });
+  add("note", "", "decisao-preco-ninar", "Decisão: preço do Ninar", "Preço mensal e por quê", ["decisao", "monetizacao"], "Fica em R$ 19,90 por mês. Ver [[paywall]] e [[aso-keywords]].\n\n> Revisar em dezembro.");
+  add("note", "", "ideias-de-jogo", "Ideias de jogo", "Lista viva de conceitos", ["ideias"], "- Capivara canhão\n- Sapo mergulhador: virou [[retencao]] de estudo\n- [[jogo-de-ritmo]]");
+
+  const keys = new Map<string, MockNote[]>();
+  for (const n of notes) {
+    if (n.name === "CLAUDE" || n.name === "MEMORY") continue;
+    for (const k of [n.name.toLowerCase(), n.title.toLowerCase()]) keys.set(k, [...(keys.get(k) ?? []), n]);
+  }
+  for (const n of notes) relink(n, notes, keys);
+  return notes;
+})();
+
+function vaultKeys(): Map<string, MockNote[]> {
+  const keys = new Map<string, MockNote[]>();
+  for (const n of VAULT) {
+    if (n.name === "CLAUDE" || n.name === "MEMORY") continue;
+    for (const k of [n.name.toLowerCase(), n.title.toLowerCase()]) keys.set(k, [...(keys.get(k) ?? []), n]);
+  }
+  return keys;
+}
+
+function mockResolved(n: MockNote, all: MockNote[], keys: Map<string, MockNote[]>): Record<string, string> {
+  const out: Record<string, string> = {};
+  const dir = n.id.slice(0, n.id.lastIndexOf("/"));
+  for (const m of n.content.matchAll(/\[\[([^\]|#\n]+)[^\]\n]*\]\]/g)) {
+    const found = keys.get(m[1].trim().toLowerCase()) ?? [];
+    const best = found.find((o) => o !== n && o.id.startsWith(`${dir}/`)) ?? found.find((o) => o !== n);
+    if (best) out[m[1].trim()] = best.id;
+  }
+  for (const m of n.content.matchAll(/\]\(([^)\s]+\.md)\)/g)) {
+    const to = all.find((o) => o.id === `${dir}/${m[1]}`);
+    if (to) out[m[1]] = to.id;
+  }
+  return out;
+}
+
+function relink(n: MockNote, all: MockNote[], keys: Map<string, MockNote[]>): void {
+  const resolved = mockResolved(n, all, keys);
+  n.links = [...new Set(Object.values(resolved))];
+  n.dangling = [...n.content.matchAll(/\[\[([^\]|#\n]+)[^\]\n]*\]\]/g)].map((m) => m[1].trim()).filter((t) => !resolved[t]);
+  n.words = n.content.split(/\s+/).filter(Boolean).length;
+  const tags = n.content.replace(/^---[\s\S]*?---/, "").match(/(?:^|\s)#([a-zà-ú][\w/-]+)/gi) ?? [];
+  for (const t of tags) {
+    const tag = t.trim().slice(1).toLowerCase();
+    if (!n.tags.includes(tag)) n.tags.push(tag);
+  }
+}
+
+function vaultIndex(): { notes: Omit<MockNote, "content">[]; tags: [string, number][] } {
+  for (const n of VAULT) n.backlinks = 0;
+  for (const n of VAULT) for (const to of n.links) VAULT.find((o) => o.id === to)!.backlinks++;
+  const counts = new Map<string, number>();
+  for (const n of VAULT) for (const t of n.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
+  return {
+    notes: VAULT.map(({ content: _content, ...rest }) => rest),
+    tags: [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
+  };
+}
+
+function lineWith(n: MockNote, needle: string): string {
+  return n.content.split("\n").find((l) => l.includes(needle))?.trim() ?? "";
+}
+
 const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   "plugin:event|listen": (args) => {
     listeners.push({ event: String(args.event), handler: Number(args.handler) });
@@ -445,6 +594,92 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
       "+  }",
     ].join("\n"),
   memories_list: () => [],
+  brain_index: () => vaultIndex(),
+  brain_open: (args) => {
+    const key = String(args.note);
+    const note = VAULT.find((n) => n.id === key) ?? VAULT.find((n) => n.name === key);
+    if (!note) throw new Error(`nenhuma nota chamada \`${key}\``);
+    vaultIndex();
+    const resolved = mockResolved(note, VAULT, vaultKeys());
+    const { content, ...meta } = note;
+    return {
+      note: meta,
+      content,
+      resolved,
+      backlinks: VAULT.filter((n) => n.links.includes(note.id)).map((n) => ({
+        id: n.id,
+        title: n.title,
+        source: n.source,
+        context: lineWith(n, note.name) || lineWith(n, note.title),
+      })),
+      outgoing: Object.entries(resolved).map(([written, id]) => {
+        const to = VAULT.find((n) => n.id === id)!;
+        return { id, title: to.title, source: to.source, context: lineWith(note, written) };
+      }),
+    };
+  },
+  brain_search: (args) => {
+    const words = String(args.query).toLowerCase().split(/\s+/).filter(Boolean);
+    const terms = words.filter((w) => !w.includes(":"));
+    const tag = words.find((w) => w.startsWith("tag:"))?.slice(4);
+    const source = words.find((w) => w.startsWith("fonte:"))?.slice(6);
+    return VAULT.filter((n) => (!tag || n.tags.includes(tag)) && (!source || n.source === source))
+      .map((n) => {
+        const hay = `${n.title} ${n.name} ${n.description} ${n.content}`.toLowerCase();
+        const score = terms.every((t) => hay.includes(t)) ? terms.reduce((sum, t) => sum + (n.title.toLowerCase().includes(t) ? 12 : 1), 0) : -1;
+        return { n, score };
+      })
+      .filter((x) => x.score >= 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, Number(args.limit) || 60)
+      .map(({ n, score }) => ({
+        id: n.id,
+        name: n.name,
+        title: n.title,
+        source: n.source,
+        group: n.group,
+        snippet: n.description || lineWith(n, terms[0] ?? "") || n.content.replace(/^---[\s\S]*?---\s*/, "").split("\n").find((l) => l && !l.startsWith("#")) || "",
+        score,
+      }));
+  },
+  brain_save: (args) => {
+    const note = VAULT.find((n) => n.id === args.note)!;
+    note.content = String(args.content);
+    note.modified = Math.floor(Date.now() / 1000);
+    relink(note, VAULT, vaultKeys());
+    const { content: _content, ...meta } = note;
+    return meta;
+  },
+  brain_create: (args) => {
+    const title = String(args.title);
+    const name = title
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+    if (VAULT.some((n) => n.source === "note" && n.name === name)) throw new Error(`já existe a nota \`${name}\``);
+    const note: MockNote = {
+      id: `~/.cosmos/brain/${name}.md`,
+      path: `/Users/bruno/.cosmos/brain/${name}.md`,
+      name,
+      title,
+      source: "note",
+      group: "",
+      description: "",
+      tags: (args.tags as string[]) ?? [],
+      modified: Math.floor(Date.now() / 1000),
+      words: 0,
+      links: [],
+      dangling: [],
+      backlinks: 0,
+      content: `---\nname: ${name}\n---\n\n# ${title}\n\n`,
+    };
+    VAULT.push(note);
+    for (const n of VAULT) relink(n, VAULT, vaultKeys());
+    const { content: _content, ...meta } = note;
+    return meta;
+  },
   pty_attach: (args) => {
     const output = args.output as { onmessage?: (m: unknown) => void } | undefined;
     if (output?.onmessage) {
@@ -469,7 +704,13 @@ export function installDevMock(): void {
     },
     invoke(cmd: string, args: Record<string, unknown> = {}) {
       const h = HANDLERS[cmd];
-      if (h) return Promise.resolve(h(args));
+      if (h) {
+        try {
+          return Promise.resolve(h(args));
+        } catch (e) {
+          return Promise.reject(e instanceof Error ? e.message : e);
+        }
+      }
       // Everything else is a side effect the mock has nothing to say about.
       return Promise.resolve(null);
     },
