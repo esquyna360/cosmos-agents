@@ -240,6 +240,21 @@ fn dispatch(app: &AppHandle, req: Request) -> Response {
         Request::BrainNew { title, body, tags, description } => home_of(app)
             .and_then(|h| brain::create(&h, &title, &body, &tags, &description))
             .and_then(|note| brain_changed(app, note)),
+        Request::WebPair => home_of(app).map(|h| {
+            let code = app.state::<crate::web::Hub>().auth.new_code(now_unix());
+            let info = crate::remote::info(&h);
+            json!({ "code": code.code, "expires": code.expires, "link": info["link"], "lan": info["lan"], "tunnel": info["tunnel"] })
+        }),
+        Request::WebDevices => Ok(json!(app.state::<crate::web::Hub>().auth.devices(now_unix()))),
+        Request::WebRevoke { id } => {
+            let gone = app.state::<crate::web::Hub>().revoke(&id);
+            if gone {
+                let _ = app.emit("web-devices-changed", json!({ "revoked": id }));
+                Ok(json!({ "revoked": id }))
+            } else {
+                Err(anyhow!("nenhum dispositivo `{id}`. Veja `cosmos web devices`"))
+            }
+        }
         Request::BrainAppend { note, text } => home_of(app)
             .and_then(|h| brain::append(&h, &note, &text))
             .and_then(|note| brain_changed(app, note)),

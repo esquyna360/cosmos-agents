@@ -35,11 +35,14 @@ enum Cmd {
         #[command(subcommand)]
         cmd: RunnerCmd,
     },
-    /// Show the remote web UI: local URL, Cloudflare tunnel and the link that
-    /// carries the token. The tunnel URL rotates on every reconnect, so this
-    /// is the way to get the current one.
+    /// The remote web UI: where it answers (local network and Cloudflare
+    /// tunnel) and who may use it. The tunnel URL rotates on every reconnect,
+    /// so this is the way to get the current one. A browser gets in by
+    /// typing a pairing code: `cosmos web pair`.
     Web {
-        /// Print only the authenticated link (or the local one if no tunnel).
+        #[command(subcommand)]
+        cmd: Option<WebCmd>,
+        /// Print only the address to open (the tunnel, else the local network).
         #[arg(long)]
         link: bool,
     },
@@ -65,6 +68,17 @@ enum Cmd {
         #[arg(long, global = true)]
         json: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum WebCmd {
+    /// A fresh six-digit pairing code, good for five minutes and one
+    /// browser. Give it only to the person who asked.
+    Pair,
+    /// Browsers that hold a session.
+    Devices,
+    /// End one browser's session.
+    Revoke { id: String },
 }
 
 #[derive(Subcommand)]
@@ -359,7 +373,7 @@ impl Target {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    if let Cmd::Web { link } = cli.cmd {
+    if let Cmd::Web { cmd: None, link } = cli.cmd {
         return web(link);
     }
     let out = output_of(&cli.cmd);
@@ -430,7 +444,10 @@ fn web(link_only: bool) -> ExitCode {
 
 fn build_request(cli: Cli) -> Result<Request, String> {
     Ok(match cli.cmd {
-        Cmd::Web { .. } => unreachable!("handled in main"),
+        Cmd::Web { cmd: None, .. } => unreachable!("handled in main"),
+        Cmd::Web { cmd: Some(WebCmd::Pair), .. } => Request::WebPair,
+        Cmd::Web { cmd: Some(WebCmd::Devices), .. } => Request::WebDevices,
+        Cmd::Web { cmd: Some(WebCmd::Revoke { id }), .. } => Request::WebRevoke { id },
         Cmd::Status => Request::Status,
         Cmd::Models => Request::Models,
         Cmd::Brain { cmd, .. } => match cmd {

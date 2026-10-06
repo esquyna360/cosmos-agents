@@ -20,6 +20,7 @@ mod tunnel;
 mod usage;
 mod worktree;
 mod web;
+mod web_auth;
 
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -988,6 +989,36 @@ fn web_info(app: AppHandle) -> Result<serde_json::Value, String> {
     Ok(remote::info(&home))
 }
 
+/// A fresh pairing code for the screen. The previous one stops working.
+#[tauri::command]
+fn web_pair_start(hub: State<'_, web::Hub>) -> web_auth::PairCode {
+    hub.auth.new_code(ops::now_unix())
+}
+
+#[tauri::command]
+fn web_pair_current(hub: State<'_, web::Hub>) -> Option<web_auth::PairCode> {
+    hub.auth.current_code(ops::now_unix())
+}
+
+#[tauri::command]
+fn web_pair_cancel(hub: State<'_, web::Hub>) {
+    hub.auth.cancel_code();
+}
+
+#[tauri::command]
+fn web_devices(hub: State<'_, web::Hub>) -> Vec<web_auth::Device> {
+    hub.auth.devices(ops::now_unix())
+}
+
+#[tauri::command]
+fn web_device_revoke(app: AppHandle, hub: State<'_, web::Hub>, id: String) -> bool {
+    let gone = hub.revoke(&id);
+    if gone {
+        let _ = tauri::Emitter::emit(&app, "web-devices-changed", serde_json::json!({ "revoked": id }));
+    }
+    gone
+}
+
 /// Re-export for `ipc_server` which lives in this crate but outside the
 /// tauri-command boundary where `uuid_v4` is otherwise private.
 pub(crate) fn uuid_v4_for_ipc() -> String {
@@ -1052,7 +1083,9 @@ pub fn run() {
             }
 
             // Remote control plane: loopback HTTP + Cloudflare tunnel.
-            match remote::start(app.handle().clone(), &home) {
+            let hub = web::Hub::new(&home);
+            app.manage(hub.clone());
+            match remote::start(app.handle().clone(), hub, &home) {
                 Ok(Some(port)) => eprintln!("[cosmos] web UI on http://127.0.0.1:{port}"),
                 Ok(None) => {}
                 Err(e) => eprintln!("[cosmos] web UI failed to start: {e}"),
@@ -1139,6 +1172,11 @@ pub fn run() {
             memories_upsert,
             memories_delete,
             web_info,
+            web_pair_start,
+            web_pair_current,
+            web_pair_cancel,
+            web_devices,
+            web_device_revoke,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

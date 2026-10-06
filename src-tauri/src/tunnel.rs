@@ -61,10 +61,6 @@ pub fn stop() {
     *url_slot().lock().unwrap() = None;
 }
 
-pub fn current_url() -> Option<String> {
-    url_slot().lock().ok().and_then(|u| u.clone())
-}
-
 /// Where cloudflared actually lives. GUI apps inherit a bare PATH, so the
 /// Homebrew prefix has to be probed explicitly rather than assumed.
 pub fn binary() -> Option<String> {

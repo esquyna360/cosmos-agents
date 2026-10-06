@@ -177,6 +177,12 @@ pub enum Request {
     },
     /// Adds text to the end of an existing note.
     BrainAppend { note: String, text: String },
+    /// A fresh pairing code for a browser, with the address to open.
+    WebPair,
+    /// Browsers that hold a session.
+    WebDevices,
+    /// Ends one browser's session.
+    WebRevoke { id: String },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
