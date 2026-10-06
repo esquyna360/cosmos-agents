@@ -1,4 +1,5 @@
 mod agent_proc;
+mod brain;
 mod claude_session;
 mod clis;
 mod fs_ops;
@@ -226,6 +227,37 @@ fn pty_screens(
 #[tauri::command]
 fn runners_vitals(app: AppHandle) -> Result<std::collections::HashMap<String, serde_json::Value>, String> {
     ops::vitals(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command(async)]
+fn brain_index(app: AppHandle) -> Result<brain::Index, String> {
+    Ok(brain::index(&home_dir(&app)?))
+}
+
+#[tauri::command(async)]
+fn brain_open(app: AppHandle, note: String) -> Result<brain::Opened, String> {
+    brain::open(&home_dir(&app)?, &note).map_err(|e| e.to_string())
+}
+
+#[tauri::command(async)]
+fn brain_search(app: AppHandle, query: String, limit: usize) -> Result<Vec<brain::Hit>, String> {
+    Ok(brain::search(&home_dir(&app)?, &query, limit))
+}
+
+#[tauri::command(async)]
+fn brain_save(app: AppHandle, note: String, content: String) -> Result<brain::Note, String> {
+    brain::save(&home_dir(&app)?, &note, &content).map_err(|e| e.to_string())
+}
+
+#[tauri::command(async)]
+fn brain_create(
+    app: AppHandle,
+    title: String,
+    body: String,
+    tags: Vec<String>,
+    description: String,
+) -> Result<brain::Note, String> {
+    brain::create(&home_dir(&app)?, &title, &body, &tags, &description).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1056,6 +1088,11 @@ pub fn run() {
             pty_resize,
             pty_screens,
             runners_vitals,
+            brain_index,
+            brain_open,
+            brain_search,
+            brain_save,
+            brain_create,
             pty_kill,
             pty_live_ids,
             debug_log,

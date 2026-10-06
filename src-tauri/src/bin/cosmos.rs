@@ -55,6 +55,154 @@ enum Cmd {
     },
     /// Providers and models an agent can run on, and which have their key.
     Models,
+    /// The second brain: every agent memory, CLAUDE.md, guideline and dev
+    /// log as one vault of linked notes. Search before you start, write down
+    /// what the next agent will need.
+    Brain {
+        #[command(subcommand)]
+        cmd: BrainCmd,
+        /// Print the raw JSON instead of text.
+        #[arg(long, global = true)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum BrainCmd {
+    /// Find notes. Every word must appear; `tag:x` and `fonte:memory`
+    /// (memory, claude, guideline, devlog, project, note) narrow it down.
+    Search {
+        query: Vec<String>,
+        #[arg(long, default_value_t = 12)]
+        limit: usize,
+    },
+    /// Print a note, then what links to it and what it links to. NOTE is a
+    /// name (as in `[[name]]`), a title or a path.
+    Read { note: String },
+    /// Only the links of a note: who mentions it and what it mentions.
+    Links { note: String },
+    /// Every note, newest first.
+    List {
+        /// memory, claude, guideline, devlog, project or note.
+        #[arg(long)]
+        source: Option<String>,
+        #[arg(long)]
+        tag: Option<String>,
+    },
+    /// Write a new note in ~/.cosmos/brain. Link others with `[[name]]`.
+    New {
+        title: String,
+        /// The Markdown body. `-` (or nothing) reads it from stdin.
+        #[arg(long)]
+        body: Option<String>,
+        /// Repeat for more than one.
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+        /// One line saying when this note matters.
+        #[arg(long, default_value = "")]
+        description: String,
+    },
+    /// Add text to the end of an existing note.
+    Append {
+        note: String,
+        /// The text. `-` (or nothing) reads it from stdin.
+        text: Option<String>,
+    },
+}
+
+enum Out {
+    Json,
+    Hits,
+    Note { links_only: bool },
+    Notes { source: Option<String>, tag: Option<String> },
+    Saved,
+}
+
+fn output_of(cmd: &Cmd) -> Out {
+    match cmd {
+        Cmd::Brain { json: false, cmd } => match cmd {
+            BrainCmd::Search { .. } => Out::Hits,
+            BrainCmd::Read { .. } => Out::Note { links_only: false },
+            BrainCmd::Links { .. } => Out::Note { links_only: true },
+            BrainCmd::List { source, tag } => Out::Notes { source: source.clone(), tag: tag.clone() },
+            BrainCmd::New { .. } | BrainCmd::Append { .. } => Out::Saved,
+        },
+        _ => Out::Json,
+    }
+}
+
+fn text_or_stdin(given: Option<String>) -> Result<String, String> {
+    match given {
+        Some(text) if text != "-" => Ok(text),
+        _ => {
+            let mut text = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut text).map_err(|e| format!("cosmos: reading stdin: {e}"))?;
+            Ok(text)
+        }
+    }
+}
+
+fn s<'a>(v: &'a serde_json::Value, key: &str) -> &'a str {
+    v.get(key).and_then(|x| x.as_str()).unwrap_or("")
+}
+
+fn print_mentions(heading: &str, list: Option<&serde_json::Value>) {
+    let Some(list) = list.and_then(|l| l.as_array()).filter(|l| !l.is_empty()) else { return };
+    println!("\n{heading} ({})", list.len());
+    for m in list {
+        println!("- {}  [{}]  {}", s(m, "title"), s(m, "source"), s(m, "id"));
+        if !s(m, "context").is_empty() {
+            println!("    {}", s(m, "context"));
+        }
+    }
+}
+
+fn print_brain(out: &Out, data: &serde_json::Value) {
+    match out {
+        Out::Json => {}
+        Out::Hits => {
+            let hits = data.as_array().cloned().unwrap_or_default();
+            if hits.is_empty() {
+                println!("nenhuma nota. Tente menos palavras, ou `cosmos brain list`.");
+            }
+            for h in &hits {
+                println!("{}  [{} · {}]", s(h, "title"), s(h, "source"), s(h, "group"));
+                println!("    {}", s(h, "id"));
+                if !s(h, "snippet").is_empty() {
+                    println!("    {}", s(h, "snippet"));
+                }
+            }
+        }
+        Out::Note { links_only } => {
+            let note = &data["note"];
+            if !links_only {
+                println!("# {}  [{} · {}]\n# {}\n", s(note, "title"), s(note, "source"), s(note, "group"), s(note, "id"));
+                println!("{}", s(data, "content").trim_end());
+            }
+            print_mentions("Quem cita esta nota", data.get("backlinks"));
+            print_mentions("O que esta nota cita", data.get("outgoing"));
+            if let Some(dangling) = note["dangling"].as_array().filter(|d| !d.is_empty()) {
+                let names: Vec<&str> = dangling.iter().filter_map(|d| d.as_str()).collect();
+                println!("\nLinks sem nota: {}", names.join(", "));
+            }
+        }
+        Out::Notes { source, tag } => {
+            let mut notes = data["notes"].as_array().cloned().unwrap_or_default();
+            notes.retain(|n| {
+                let by_source = source.as_deref().is_none_or(|want| s(n, "source") == want);
+                let by_tag = tag.as_deref().is_none_or(|want| {
+                    n["tags"].as_array().is_some_and(|tags| tags.iter().any(|t| t.as_str() == Some(want)))
+                });
+                by_source && by_tag
+            });
+            notes.sort_by_key(|n| std::cmp::Reverse(n["modified"].as_i64().unwrap_or(0)));
+            for n in &notes {
+                println!("{}  [{} · {}]  {}", s(n, "name"), s(n, "source"), s(n, "group"), s(n, "id"));
+            }
+            println!("{} notas", notes.len());
+        }
+        Out::Saved => println!("salvo: {}  ({})", s(data, "name"), s(data, "id")),
+    }
 }
 
 #[derive(Subcommand)]
@@ -214,6 +362,7 @@ fn main() -> ExitCode {
     if let Cmd::Web { link } = cli.cmd {
         return web(link);
     }
+    let out = output_of(&cli.cmd);
     let req = match build_request(cli) {
         Ok(r) => r,
         Err(e) => {
@@ -224,7 +373,9 @@ fn main() -> ExitCode {
     match send(req) {
         Ok(resp) => {
             if resp.ok {
-                if let Some(data) = resp.data {
+                if let (false, Some(data)) = (matches!(out, Out::Json), &resp.data) {
+                    print_brain(&out, data);
+                } else if let Some(data) = resp.data {
                     // Pretty-print so humans can grok it, but it's still valid
                     // JSON for agents that want to parse.
                     match serde_json::to_string_pretty(&data) {
@@ -282,6 +433,21 @@ fn build_request(cli: Cli) -> Result<Request, String> {
         Cmd::Web { .. } => unreachable!("handled in main"),
         Cmd::Status => Request::Status,
         Cmd::Models => Request::Models,
+        Cmd::Brain { cmd, .. } => match cmd {
+            BrainCmd::Search { query, limit } => {
+                let query = query.join(" ");
+                if query.trim().is_empty() {
+                    return Err("cosmos: `brain search` needs words: cosmos brain search <o que procurar>".into());
+                }
+                Request::BrainSearch { query, limit: Some(limit) }
+            }
+            BrainCmd::Read { note } | BrainCmd::Links { note } => Request::BrainRead { note },
+            BrainCmd::List { .. } => Request::BrainList,
+            BrainCmd::New { title, body, tags, description } => {
+                Request::BrainNew { title, body: text_or_stdin(body)?, tags, description }
+            }
+            BrainCmd::Append { note, text } => Request::BrainAppend { note, text: text_or_stdin(text)? },
+        },
         Cmd::Route { task } => {
             let task = task.join(" ");
             if task.trim().is_empty() {

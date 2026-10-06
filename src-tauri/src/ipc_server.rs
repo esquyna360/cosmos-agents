@@ -26,6 +26,7 @@ use serde_json::json;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::agent_proc::AgentSupervisor;
+use crate::brain;
 use crate::ipc::{Request, Response};
 use crate::ops::{self, home_of, liveness, now_unix};
 use crate::projects::{self, ProjectRecord, RunnerRecord};
@@ -231,11 +232,27 @@ fn dispatch(app: &AppHandle, req: Request) -> Response {
         Request::Status => ops::status(app),
         Request::Route { task } => ops::suggest(app, &task).and_then(|s| Ok(serde_json::to_value(s)?)),
         Request::Models => home_of(app).and_then(|h| Ok(serde_json::to_value(crate::providers::list(&h))?)),
+        Request::BrainSearch { query, limit } => {
+            home_of(app).and_then(|h| Ok(serde_json::to_value(brain::search(&h, &query, limit.unwrap_or(12)))?))
+        }
+        Request::BrainRead { note } => home_of(app).and_then(|h| Ok(serde_json::to_value(brain::open(&h, &note)?)?)),
+        Request::BrainList => home_of(app).and_then(|h| Ok(serde_json::to_value(brain::index(&h))?)),
+        Request::BrainNew { title, body, tags, description } => home_of(app)
+            .and_then(|h| brain::create(&h, &title, &body, &tags, &description))
+            .and_then(|note| brain_changed(app, note)),
+        Request::BrainAppend { note, text } => home_of(app)
+            .and_then(|h| brain::append(&h, &note, &text))
+            .and_then(|note| brain_changed(app, note)),
     };
     match result {
         Ok(v) => Response::ok(v),
         Err(e) => Response::err(e.to_string()),
     }
+}
+
+fn brain_changed(app: &AppHandle, note: brain::Note) -> Result<serde_json::Value> {
+    let _ = app.emit("brain-changed", &note.id);
+    Ok(serde_json::to_value(note)?)
 }
 
 fn handle_project_add(

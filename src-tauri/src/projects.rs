@@ -375,6 +375,22 @@ The new agent appears in the app but does **not** steal focus, and is recorded \
 as delegated by you.\n",
     );
 
+    out.push_str("\n## Second brain\n\n");
+    out.push_str(
+        "Every agent memory, CLAUDE.md, guideline and dev log on this machine is one \
+vault of linked notes. Before starting something that was probably done before \
+(a store upload, a build, a portal, a client), search it. When you learn \
+something the next agent will need, write it down and link related notes with \
+`[[name]]`.\n\n",
+    );
+    out.push_str("```sh\n");
+    out.push_str("cosmos brain search <words> [tag:<tag>] [fonte:memory|claude|guideline|devlog|note]\n");
+    out.push_str("cosmos brain read <name or path>      # the note, who cites it, what it cites\n");
+    out.push_str("cosmos brain links <name or path>     # only the links\n");
+    out.push_str("cosmos brain new \"<title>\" --tag <tag> --description \"<when it matters>\" --body -   # body from stdin\n");
+    out.push_str("cosmos brain append <name> \"<text>\"\n");
+    out.push_str("```\n");
+
     // For each folder that already has its own CLAUDE.md, @-include it so the
     // repo's existing context isn't silently dropped just because the agent's
     // cwd is the synthetic dir. Checks both `.claude/CLAUDE.md` and the

@@ -155,6 +155,28 @@ pub enum Request {
     Route { task: String },
     /// Providers, their models and whether each has its key.
     Models,
+    /// Notes of the second brain that match a query.
+    BrainSearch {
+        query: String,
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    /// One note with its content, backlinks and outgoing links. `note` is an
+    /// id, a path or a name.
+    BrainRead { note: String },
+    /// Every note, without content.
+    BrainList,
+    /// A new note in `~/.cosmos/brain`.
+    BrainNew {
+        title: String,
+        body: String,
+        #[serde(default)]
+        tags: Vec<String>,
+        #[serde(default)]
+        description: String,
+    },
+    /// Adds text to the end of an existing note.
+    BrainAppend { note: String, text: String },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
