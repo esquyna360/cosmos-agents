@@ -2,8 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 
 export interface WebInfo {
   port?: number;
-  token?: string;
   local?: string;
+  lan?: string | null;
   tunnel?: string | null;
   link?: string | null;
   error?: string;
@@ -17,6 +17,7 @@ export interface RemoteConfig {
   enabled: boolean;
   port: number;
   tunnel: boolean;
+  lan: boolean;
   telegram_notify: boolean;
   telegram_chat_id: string;
   telegram_token_file: string;
@@ -38,4 +39,42 @@ export function remoteConfigSet(config: RemoteConfig): Promise<void> {
 
 export function appVersion(): Promise<string> {
   return invoke("app_version");
+}
+
+/** The code a new browser types to get in. */
+export interface PairCode {
+  code: string;
+  /** Unix seconds. */
+  expires: number;
+}
+
+/** A browser that was let in. */
+export interface WebDevice {
+  id: string;
+  name: string;
+  created: number;
+  lastSeen: number;
+  expires: number;
+  address: string;
+  agent: string;
+}
+
+export function webPairStart(): Promise<PairCode> {
+  return invoke("web_pair_start");
+}
+
+export function webPairCurrent(): Promise<PairCode | null> {
+  return invoke("web_pair_current");
+}
+
+export function webPairCancel(): Promise<void> {
+  return invoke("web_pair_cancel");
+}
+
+export function webDevices(): Promise<WebDevice[]> {
+  return invoke("web_devices");
+}
+
+export function webDeviceRevoke(id: string): Promise<boolean> {
+  return invoke("web_device_revoke", { id });
 }

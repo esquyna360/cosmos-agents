@@ -422,6 +422,12 @@ function lineWith(n: MockNote, needle: string): string {
   return n.content.split("\n").find((l) => l.includes(needle))?.trim() ?? "";
 }
 
+let PAIR: { code: string; expires: number } | null = null;
+let DEVICES = [
+  { id: "a1", name: "iPhone · Safari", created: 0, lastSeen: Date.now() / 1000 - 120, expires: 0, address: "192.168.1.23", agent: "iPhone" },
+  { id: "b2", name: "MacBook da sala · Chrome", created: 0, lastSeen: Date.now() / 1000 - 3 * 86400, expires: 0, address: "189.44.12.7", agent: "Macintosh" },
+];
+
 const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   "plugin:event|listen": (args) => {
     listeners.push({ event: String(args.event), handler: Number(args.handler) });
@@ -457,14 +463,26 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => unknown> = {
   app_version: () => "0.3.0",
   web_info: () => ({
     port: 7777,
-    local: "http://127.0.0.1:7777/?t=dev",
+    local: "http://127.0.0.1:7777",
+    lan: "http://192.168.1.14:7777",
     tunnel: "https://mock-tunnel.trycloudflare.com",
-    link: "https://mock-tunnel.trycloudflare.com/?t=dev",
+    link: "https://mock-tunnel.trycloudflare.com",
   }),
+  web_pair_start: () => (PAIR = { code: String(Math.floor(Math.random() * 1e6)).padStart(6, "0"), expires: Date.now() / 1000 + 300 }),
+  web_pair_current: () => PAIR,
+  web_pair_cancel: () => {
+    PAIR = null;
+  },
+  web_devices: () => DEVICES,
+  web_device_revoke: (a) => {
+    DEVICES = DEVICES.filter((d) => d.id !== a.id);
+    return true;
+  },
   remote_config_get: () => ({
     enabled: true,
     port: 7777,
     tunnel: true,
+    lan: true,
     telegram_notify: true,
     telegram_chat_id: "7230480470",
     telegram_token_file: "~/.private_keys/telegram_bot_token",

@@ -18,6 +18,7 @@ import { openJump } from "../stores/jump";
 import { setSettingsOpen, sidebarOpen } from "../stores/layout";
 import { cycleTheme, themeSpec } from "../stores/theme";
 import { webInfo, type WebInfo } from "../lib/remote";
+import { isWeb } from "../lib/platform";
 import { needsYou } from "../ui/StatusGlyph";
 import { openMenu } from "../ui/Menu";
 import { projectMenu, runnerMenu } from "./menus";
@@ -45,7 +46,8 @@ export default function TopStrip() {
   return (
     <header
       data-tauri-drag-region
-      class="flex h-[var(--strip-h)] shrink-0 items-center gap-1 border-b border-line bg-panel pl-[84px] pr-2.5"
+      class="cx-strip flex h-[var(--strip-h)] shrink-0 items-center gap-1 border-b border-line bg-panel pr-2.5"
+      classList={{ "pl-[84px]": !isWeb, "pl-2.5": isWeb }}
     >
       <nav class="flex shrink-0 items-center gap-0.5">
         <button class="cx-pill" data-on={route().kind === "home"} onClick={() => go({ kind: "home" })}>
@@ -121,7 +123,9 @@ export default function TopStrip() {
       </Show>
 
       <div class="ml-auto flex shrink-0 items-center gap-1 pl-2">
-        <Remote />
+        <Show when={!isWeb}>
+          <Remote />
+        </Show>
         <button class="cx-pill" onClick={openJump} title="Ir para qualquer agente ou projeto">
           <Search size={12} />
           Ir para
@@ -205,7 +209,7 @@ function Remote() {
     <Show when={link()}>
       <button
         class="cx-icon-btn"
-        title={copied() ? "Link copiado" : `${online() ? "Acesso remoto" : "Acesso local"}: copiar link`}
+        title={copied() ? "Endereço copiado" : `${online() ? "Acesso remoto" : "Acesso na rede local"}: copiar endereço`}
         onClick={() =>
           navigator.clipboard.writeText(link()!).then(() => {
             setCopied(true);

@@ -209,11 +209,17 @@ export default function Terminal(props: Props) {
     });
     ro.observe(host);
 
+    // The PTY has one size and may be on show in more than one place (the
+    // window, a browser). Whoever is being used right now claims it.
+    const claim = () => ptyResize(id, t.cols, t.rows).catch(() => {});
+    window.addEventListener("focus", claim);
+
     t.focus();
 
     onCleanup(() => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      window.removeEventListener("focus", claim);
       dataDisp.dispose();
       resizeDisp.dispose();
       t.dispose();

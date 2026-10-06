@@ -6,10 +6,17 @@ import {
   Globe,
   Keyboard,
   Loader2,
+  LogOut,
+  Monitor,
+  MonitorSmartphone,
   Palette,
   RefreshCw,
+  Smartphone,
   X,
 } from "lucide-solid";
+import { listen } from "@tauri-apps/api/event";
+
+import { isWeb } from "../lib/platform";
 
 import { setSettingsOpen } from "../stores/layout";
 import { applyTheme, theme, themePref, THEMES } from "../stores/theme";
@@ -26,8 +33,15 @@ import {
 import {
   remoteConfigGet,
   remoteConfigSet,
+  webDeviceRevoke,
+  webDevices,
   webInfo,
+  webPairCancel,
+  webPairCurrent,
+  webPairStart,
+  type PairCode,
   type RemoteConfigView,
+  type WebDevice,
   type WebInfo,
 } from "../lib/remote";
 
@@ -37,7 +51,8 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "aparencia", label: "aparência" },
   { id: "atalhos", label: "atalhos" },
   { id: "remoto", label: "remoto" },
-  { id: "updates", label: "updates" },
+  // A browser runs whatever the computer is running.
+  ...(isWeb ? [] : [{ id: "updates" as Tab, label: "updates" }]),
 ];
 
 export default function SettingsPanel() {
@@ -95,7 +110,9 @@ export default function SettingsPanel() {
             <ShortcutsSection />
           </Show>
           <Show when={tab() === "remoto"}>
-            <RemoteSection />
+            <Show when={isWeb} fallback={<RemoteSection />}>
+              <WebSessionSection />
+            </Show>
           </Show>
           <Show when={tab() === "updates"}>
             <UpdatesSection />
@@ -281,7 +298,6 @@ function RemoteSection() {
   const [cfg, setCfg] = createSignal<RemoteConfigView | null>(null);
   const [info, setInfo] = createSignal<WebInfo | null>(null);
   const [busy, setBusy] = createSignal(false);
-  const [copied, setCopied] = createSignal(false);
   const [note, setNote] = createSignal<string | null>(null);
 
   const refresh = () => {
@@ -316,79 +332,284 @@ function RemoteSection() {
     }
   }
 
-  const link = () => info()?.link || info()?.local || null;
+  const up = () => Boolean(info()?.port);
 
   return (
     <section class="flex flex-col gap-3">
-      <SectionTitle icon={Globe} title="acesso remoto" hint="web UI + túnel" />
+      <SectionTitle icon={Globe} title="acesso remoto" hint="o Cosmos no navegador" />
 
       <Show when={cfg()} fallback={<Muted>carregando…</Muted>} keyed>
         {(c) => (
           <>
-            <Toggle
-              label="web UI"
-              hint="servidor local em 127.0.0.1 — vale no próximo start"
-              checked={c.enabled}
-              disabled={busy()}
-              onChange={(v) =>
-                patch({ enabled: v }, "o servidor só liga/desliga ao reabrir o Cosmos")
-              }
-            />
+            <Show when={up()}>
+              <PairBox />
+              <div class="flex flex-col gap-1.5">
+                <Show when={info()?.tunnel}>
+                  {(url) => <Address label="de qualquer lugar" url={url()} live />}
+                </Show>
+                <Show when={info()?.lan}>{(url) => <Address label="na sua rede" url={url()} />}</Show>
+                <Show when={!info()?.tunnel && !info()?.lan && info()?.local}>
+                  {(url) => <Address label="só neste computador" url={url()} />}
+                </Show>
+              </div>
+              <DeviceList />
+            </Show>
 
-            <Toggle
-              label="túnel Cloudflare"
-              hint={
-                c.cloudflared_present
-                  ? "expõe a web UI numa URL pública — aplica na hora"
-                  : "cloudflared não encontrado nesta máquina"
-              }
-              checked={c.tunnel}
-              disabled={busy() || !c.cloudflared_present}
-              onChange={(v) => patch({ tunnel: v })}
-            />
-
-            <Toggle
-              label="avisar no Telegram"
-              hint="manda a URL nova toda vez que o túnel reconecta"
-              checked={c.telegram_notify}
-              disabled={busy()}
-              onChange={(v) => patch({ telegram_notify: v })}
-            />
-
-            <div class="flex items-center gap-2 rounded-cx border border-line bg-fill-1 px-2.5 py-2">
-              <span
-                class="h-1.5 w-1.5 shrink-0 rounded-full"
-                classList={{
-                  "bg-live": c.tunnel_running,
-                  "bg-faint": !c.tunnel_running,
-                }}
+            <div class="mt-1 flex flex-col gap-2">
+              <Toggle
+                label="servir o Cosmos no navegador"
+                hint="vale ao reabrir o Cosmos"
+                checked={c.enabled}
+                disabled={busy()}
+                onChange={(v) => patch({ enabled: v }, "o servidor só liga ou desliga ao reabrir o Cosmos")}
               />
-              <span class="min-w-0 flex-1 truncate font-mono text-[10.5px] text-dim">
-                {link() ?? "web UI desligada"}
-              </span>
-              <button
-                class="shrink-0 rounded p-1 text-faint transition hover:bg-fill-2 hover:text-ink disabled:opacity-40"
-                disabled={!link()}
-                title="copiar link"
-                onClick={() => {
-                  const u = link();
-                  if (!u) return;
-                  navigator.clipboard.writeText(u).then(() => {
-                    setCopied(true);
-                    setTimeout(() => setCopied(false), 1500);
-                  });
-                }}
-              >
-                {copied() ? <Check size={12} /> : <Copy size={12} />}
-              </button>
+              <Toggle
+                label="rede local"
+                hint="celular e outros computadores no mesmo Wi-Fi — vale ao reabrir"
+                checked={c.lan}
+                disabled={busy()}
+                onChange={(v) => patch({ lan: v }, "a rede local só liga ou desliga ao reabrir o Cosmos")}
+              />
+              <Toggle
+                label="túnel Cloudflare"
+                hint={
+                  c.cloudflared_present
+                    ? "um endereço público que funciona fora de casa — aplica na hora"
+                    : "cloudflared não encontrado nesta máquina"
+                }
+                checked={c.tunnel}
+                disabled={busy() || !c.cloudflared_present}
+                onChange={(v) => patch({ tunnel: v })}
+              />
+              <Toggle
+                label="avisar no Telegram"
+                hint="manda o endereço novo toda vez que o túnel reconecta"
+                checked={c.telegram_notify}
+                disabled={busy()}
+                onChange={(v) => patch({ telegram_notify: v })}
+              />
             </div>
 
             <Show when={note()}>
               <p class="text-[11px] leading-relaxed text-busy">{note()}</p>
             </Show>
+            <p class="text-[11px] leading-relaxed text-faint">
+              O endereço sozinho não abre nada: cada navegador entra com um código mostrado aqui e pode ser
+              desligado da lista a qualquer momento.
+            </p>
           </>
         )}
       </Show>
+    </section>
+  );
+}
+
+function Address(props: { label: string; url: string; live?: boolean }) {
+  const [copied, setCopied] = createSignal(false);
+  return (
+    <div class="flex items-center gap-2 rounded-cx border border-line bg-fill-1 px-2.5 py-2">
+      <span class="h-1.5 w-1.5 shrink-0 rounded-full" classList={{ "bg-live": props.live, "bg-faint": !props.live }} />
+      <span class="w-[104px] shrink-0 text-[11px] text-faint">{props.label}</span>
+      <span class="min-w-0 flex-1 truncate font-mono text-[10.5px] text-dim">{props.url}</span>
+      <button
+        class="shrink-0 rounded p-1 text-faint transition hover:bg-fill-2 hover:text-ink"
+        title="copiar endereço"
+        onClick={() =>
+          navigator.clipboard.writeText(props.url).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          })
+        }
+      >
+        {copied() ? <Check size={12} /> : <Copy size={12} />}
+      </button>
+    </div>
+  );
+}
+
+/** The code a new browser types. It is shown only on request, counts down,
+ *  and leaves the screen the moment someone uses it. */
+function PairBox() {
+  const [code, setCode] = createSignal<PairCode | null>(null);
+  const [now, setNow] = createSignal(Date.now() / 1000);
+  const [joined, setJoined] = createSignal<string | null>(null);
+  const left = () => Math.max(0, Math.round((code()?.expires ?? 0) - now()));
+
+  onMount(() => {
+    webPairCurrent().then(setCode).catch(() => {});
+    const t = setInterval(() => {
+      setNow(Date.now() / 1000);
+      if (code() && left() === 0) setCode(null);
+    }, 1000);
+    const off = listen<{ paired?: WebDevice }>("web-devices-changed", (e) => {
+      if (!e.payload?.paired) return;
+      setCode(null);
+      setJoined(e.payload.paired.name);
+      setTimeout(() => setJoined(null), 6000);
+    });
+    onCleanup(() => {
+      clearInterval(t);
+      off.then((u) => u());
+    });
+  });
+
+  const start = () => {
+    setJoined(null);
+    setNow(Date.now() / 1000);
+    webPairStart().then(setCode).catch(() => {});
+  };
+  const cancel = () => {
+    setCode(null);
+    webPairCancel().catch(() => {});
+  };
+  const clock = () => `${Math.floor(left() / 60)}:${String(left() % 60).padStart(2, "0")}`;
+
+  return (
+    <div class="cx-pairbox" data-on={Boolean(code())}>
+      <Show
+        when={code()}
+        fallback={
+          <div class="flex items-center gap-3">
+            <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-[11px] bg-accent-soft text-accent">
+              <MonitorSmartphone size={17} strokeWidth={1.7} />
+            </span>
+            <span class="min-w-0 flex-1">
+              <Show
+                when={joined()}
+                fallback={
+                  <>
+                    <span class="block text-[12.5px] font-medium">Parear dispositivo</span>
+                    <span class="block text-[11px] text-faint">Mostra um código de 6 dígitos que vale 5 minutos</span>
+                  </>
+                }
+              >
+                <span class="flex items-center gap-1.5 text-[12.5px] font-medium text-live">
+                  <Check size={13} />
+                  {joined()} entrou
+                </span>
+                <span class="block text-[11px] text-faint">Já aparece na lista abaixo</span>
+              </Show>
+            </span>
+            <button class="cx-btn-primary !h-[28px] !px-3 !text-[12px]" onClick={start}>
+              Gerar código
+            </button>
+          </div>
+        }
+      >
+        {(c) => (
+          <div class="flex flex-col items-center gap-2 py-1">
+            <span class="text-[11px] text-faint">Digite no navegador que quer entrar</span>
+            <span class="cx-pairbox-code" aria-label={`Código ${c().code.split("").join(" ")}`}>
+              <For each={c().code.split("")}>
+                {(d, i) => <span classList={{ "ml-2.5": i() === 3 }}>{d}</span>}
+              </For>
+            </span>
+            <span class="cx-pairbox-bar">
+              <span style={{ width: `${(left() / 300) * 100}%` }} />
+            </span>
+            <span class="flex items-center gap-3 text-[11px] text-faint">
+              <span class="tabular-nums">vale por {clock()}</span>
+              <button class="underline-offset-2 hover:text-ink hover:underline" onClick={start}>
+                gerar outro
+              </button>
+              <button class="underline-offset-2 hover:text-ink hover:underline" onClick={cancel}>
+                cancelar
+              </button>
+            </span>
+          </div>
+        )}
+      </Show>
+    </div>
+  );
+}
+
+function seenAgo(unix: number): string {
+  const mins = Math.max(0, Math.round((Date.now() / 1000 - unix) / 60));
+  if (mins < 15) return "ativo agora";
+  if (mins < 60) return `visto há ${mins} min`;
+  if (mins < 60 * 24) return `visto há ${Math.round(mins / 60)} h`;
+  return `visto há ${Math.round(mins / (60 * 24))} d`;
+}
+
+function DeviceList() {
+  const [devices, setDevices] = createSignal<WebDevice[] | null>(null);
+  const refresh = () => webDevices().then(setDevices).catch(() => {});
+
+  onMount(() => {
+    refresh();
+    const t = setInterval(refresh, 15_000);
+    const off = listen("web-devices-changed", refresh);
+    onCleanup(() => {
+      clearInterval(t);
+      off.then((u) => u());
+    });
+  });
+
+  return (
+    <div class="flex flex-col gap-1.5">
+      <span class="text-[11px] text-faint">
+        {devices()?.length ? "Navegadores com acesso" : "Nenhum navegador tem acesso ainda"}
+      </span>
+      <For each={devices() ?? []}>
+        {(d) => (
+          <div class="group flex items-center gap-2.5 rounded-cx border border-line px-2.5 py-2">
+            <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px] bg-fill-2 text-dim">
+              {/iPhone|iPad|Android/.test(d.agent) ? <Smartphone size={14} /> : <Monitor size={14} />}
+            </span>
+            <span class="min-w-0 flex-1">
+              <span class="block truncate text-[12.5px] font-medium">{d.name}</span>
+              <span class="block truncate text-[10.5px] text-faint">
+                {seenAgo(d.lastSeen)} · {d.address}
+              </span>
+            </span>
+            <button
+              class="cx-pill !h-[24px] !px-2.5 !text-[11.5px] text-faint hover:!bg-alert-soft hover:!text-alert"
+              title="Encerrar a sessão deste navegador"
+              onClick={() => webDeviceRevoke(d.id).then(refresh)}
+            >
+              Desligar
+            </button>
+          </div>
+        )}
+      </For>
+    </div>
+  );
+}
+
+/** In a browser there is no desk to manage: only this session to end. */
+function WebSessionSection() {
+  const [device, setDevice] = createSignal<WebDevice | null>(null);
+  onMount(() => {
+    fetch("/api/session", { credentials: "same-origin" })
+      .then((r) => r.json())
+      .then((s) => setDevice(s.device ?? null))
+      .catch(() => {});
+  });
+  return (
+    <section class="flex flex-col gap-3">
+      <SectionTitle icon={Globe} title="este navegador" hint="acesso remoto" />
+      <div class="flex items-center gap-2.5 rounded-cx border border-line px-2.5 py-2.5">
+        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-live-soft text-live">
+          <MonitorSmartphone size={15} />
+        </span>
+        <span class="min-w-0 flex-1">
+          <span class="block truncate text-[12.5px] font-medium">{device()?.name ?? "Pareado"}</span>
+          <span class="block text-[10.5px] text-faint">
+            A sessão dura 30 dias sem uso e pode ser desligada no Cosmos do computador
+          </span>
+        </span>
+        <button
+          class="cx-pill cx-pill-line !h-[26px] !text-[12px]"
+          onClick={() => import("../web/bridge").then((m) => m.signOut())}
+        >
+          <LogOut size={12} />
+          Sair
+        </button>
+      </div>
+      <p class="text-[11px] leading-relaxed text-faint">
+        Parear outros dispositivos e ligar ou desligar o acesso remoto se faz no Cosmos do computador, em Ajustes ›
+        Acesso remoto.
+      </p>
     </section>
   );
 }

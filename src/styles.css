@@ -1365,3 +1365,235 @@ button:focus-visible,
     inset 0 0 0 1px var(--line-strong);
   animation: cx-sheet-in 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.1) both;
 }
+
+/* ================================================================== web ==
+
+   The same app in a browser. Only what a window gave for free is redone
+   here: the pairing screen, room for a thumb, and a layout that folds. */
+
+.cx-pair {
+  position: relative;
+  display: flex;
+  min-height: 100dvh;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 24px 16px;
+  background: var(--void);
+  color: var(--text);
+}
+.cx-pair-glow {
+  position: absolute;
+  top: -30%;
+  left: 50%;
+  width: min(900px, 160vw);
+  aspect-ratio: 1;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(closest-side, var(--accent-soft), transparent 70%);
+  animation: cx-pair-breathe 9s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes cx-pair-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: translateX(-50%) scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: translateX(-50%) scale(1.08);
+  }
+}
+.cx-pair-card {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+  padding: 30px 28px 24px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--raised) 88%, transparent);
+  box-shadow: var(--shadow-2);
+  text-align: center;
+  backdrop-filter: saturate(1.4) blur(18px);
+  -webkit-backdrop-filter: saturate(1.4) blur(18px);
+  animation: cx-pair-in 0.5s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+@keyframes cx-pair-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+}
+.cx-pair-mark {
+  display: inline-flex;
+  height: 48px;
+  width: 48px;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+  border-radius: 15px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.cx-pair-code {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 22px;
+  cursor: text;
+}
+.cx-pair-code[data-shake="true"] {
+  animation: cx-pair-shake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+.cx-pair-code[data-off="true"] {
+  opacity: 0.45;
+}
+@keyframes cx-pair-shake {
+  10%,
+  90% {
+    transform: translateX(-1px);
+  }
+  20%,
+  80% {
+    transform: translateX(3px);
+  }
+  30%,
+  50%,
+  70% {
+    transform: translateX(-6px);
+  }
+  40%,
+  60% {
+    transform: translateX(6px);
+  }
+}
+/* One real field under six painted cells: paste, autofill and the phone's
+   numeric keyboard all work as they would on any code field. */
+.cx-pair-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  font-size: 16px;
+  caret-color: transparent;
+}
+.cx-pair-cell {
+  display: flex;
+  height: 54px;
+  width: 44px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: var(--well);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  font-family: "JetBrains Mono Variable", ui-monospace, monospace;
+  font-size: 24px;
+  font-weight: 500;
+  color: var(--text);
+  transition:
+    box-shadow 0.14s,
+    transform 0.14s;
+}
+:root[data-theme="cream"] .cx-pair-cell,
+:root[data-theme="day"] .cx-pair-cell,
+:root[data-theme="dawn"] .cx-pair-cell,
+:root[data-theme="paper"] .cx-pair-cell {
+  background: var(--float);
+}
+.cx-pair-cell[data-filled="true"] {
+  animation: cx-pair-pop 0.16s ease-out;
+}
+@keyframes cx-pair-pop {
+  from {
+    transform: scale(0.9);
+  }
+}
+.cx-pair-cell[data-on="true"] {
+  box-shadow:
+    inset 0 0 0 1.5px var(--accent),
+    0 0 0 4px var(--accent-soft);
+}
+.cx-pair-name {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 10px;
+  background: var(--fill-1);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 16px;
+  color: var(--text);
+  outline: none;
+  transition: box-shadow 0.14s;
+}
+.cx-pair-name:focus {
+  box-shadow:
+    inset 0 0 0 1px var(--accent),
+    0 0 0 3px var(--accent-soft);
+}
+.cx-pair-foot {
+  position: relative;
+  margin-top: 18px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cx-pair-glow,
+  .cx-pair-card,
+  .cx-pair-code[data-shake="true"],
+  .cx-pair-cell[data-filled="true"] {
+    animation: none;
+  }
+}
+
+.cx-pairbox {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--fill-1);
+  transition:
+    border-color 0.2s,
+    background-color 0.2s;
+}
+.cx-pairbox[data-on="true"] {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: var(--accent-soft);
+}
+.cx-pairbox-code {
+  display: flex;
+  gap: 5px;
+  font-family: "JetBrains Mono Variable", ui-monospace, monospace;
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: var(--text);
+  user-select: all;
+  animation: cx-pair-in 0.3s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+.cx-pairbox-code > span {
+  display: flex;
+  height: 44px;
+  width: 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: var(--float);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.cx-pairbox-bar {
+  width: 236px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--fill-3);
+}
+.cx-pairbox-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width 1s linear;
+}

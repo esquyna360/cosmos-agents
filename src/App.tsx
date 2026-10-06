@@ -32,6 +32,7 @@ import AgentCreatorModal from "./components/AgentCreatorModal";
 import UpdateBanner from "./components/UpdateBanner";
 import SettingsPanel from "./components/SettingsPanel";
 import { MenuHost } from "./ui/Menu";
+import { isWeb } from "./lib/platform";
 import { creator, openCreator, closeCreator } from "./stores/creator";
 import {
   attachExternalChangesListener,
@@ -327,7 +328,9 @@ export default function App() {
         <SettingsPanel />
       </Show>
       <MenuHost />
-      <UpdateBanner />
+      <Show when={!isWeb}>
+        <UpdateBanner />
+      </Show>
     </div>
   );
 }
